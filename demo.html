@@ -88,10 +88,19 @@
     border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px;
   }
   #basemap .leaflet-control-attribution a { color: var(--cube); }
+  /* Dark-theme zoom control */
+  #basemap .leaflet-control-zoom a {
+    background: rgba(11,16,21,.85); color: var(--ink-2); border-color: var(--line);
+    font-size: 16px; line-height: 26px;
+  }
+  #basemap .leaflet-control-zoom a:hover { background: var(--bg-3); color: var(--ink); border-color: var(--cube); }
+  #basemap .leaflet-control-zoom { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   /* Tint satellite tiles slightly to fit dark UI */
   #basemap .leaflet-tile { filter: saturate(.85) brightness(.78) contrast(1.05); }
-  #mapWrap.no-bg #basemap { opacity: 0; pointer-events: none; }
-  svg.map { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+  /* When bg off, hide tiles but keep SVG overlay visible */
+  #mapWrap.no-bg .leaflet-tile-pane { opacity: 0; pointer-events: none; }
+  /* SVG is positioned by L.svgOverlay — only set pointer model here */
+  svg.map { pointer-events: none; }
   svg.map .cube-g, svg.map .asset-g, svg.map .a-shape, svg.map .asset-line, svg.map .a-label, svg.map .support-g { pointer-events: auto; }
   .legend, .pop-card, .inspector { z-index: 10; }
 
@@ -473,6 +482,7 @@
       <span class="track"></span>
       <span>map</span>
     </label>
+    <button class="btn" id="resetMap" title="Reset map to default view">⊙ reset map</button>
     <button class="btn" id="jumpBefore">↦ before shift</button>
     <button class="btn" id="jumpAfter">↦ after shift</button>
     <button class="btn primary" id="restart">↺ restart</button>
@@ -496,7 +506,7 @@
       <button data-style="topo">Topo</button>
       <button data-style="dark">Dark</button>
     </div>
-    <svg class="map" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid meet">
+    <svg class="map" viewBox="0 0 800 600" preserveAspectRatio="none">
       <defs>
         <radialGradient id="coneGradient" cx="0" cy="50%" r="100%">
           <stop offset="0%" stop-color="#ff5a2c" stop-opacity=".55"/>
@@ -835,9 +845,16 @@ const TILE_STYLES = {
 
 const lmap = L.map("basemap", {
   zoomControl: false, attributionControl: true,
-  dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
-  boxZoom: false, keyboard: false, touchZoom: false, zoomSnap: 0.01
+  dragging: true, scrollWheelZoom: true, doubleClickZoom: true,
+  boxZoom: false, keyboard: false, touchZoom: true, zoomSnap: 0.25
 }).fitBounds(MAP_BOUNDS, { animate: false });
+
+// Snapshot the initial view immediately after fitBounds so reset is always exact
+const MAP_INIT_ZOOM   = lmap.getZoom();
+const MAP_INIT_CENTRE = lmap.getCenter();
+
+// Zoom control at bottom-right (legend lives at bottom-left)
+L.control.zoom({ position: 'bottomright' }).addTo(lmap);
 
 let currentTileLayer = null;
 function setBasemapStyle(key) {
@@ -850,17 +867,17 @@ function setBasemapStyle(key) {
 }
 setBasemapStyle("satellite");
 
+// Bind the SVG overlay to the map bounds so it pans and zooms with the tiles.
+const _mapSvg = document.querySelector('svg.map');
+L.svgOverlay(_mapSvg, MAP_BOUNDS, { opacity: 1, interactive: true }).addTo(lmap);
+
 document.querySelectorAll(".map-style-pick button").forEach(b => {
   b.addEventListener("click", () => setBasemapStyle(b.getAttribute("data-style")));
 });
 
-// Keep Leaflet sized to its container and locked to bounds on window resize.
-window.addEventListener("resize", () => {
-  lmap.invalidateSize({ animate: false });
-  lmap.fitBounds(MAP_BOUNDS, { animate: false });
-});
-// Re-fit shortly after init in case fonts/layout settle late.
-setTimeout(() => { lmap.invalidateSize({ animate: false }); lmap.fitBounds(MAP_BOUNDS, { animate: false }); }, 60);
+// Keep Leaflet sized to its container on resize — do NOT reset bounds so pan/zoom state is preserved.
+window.addEventListener("resize", () => { lmap.invalidateSize({ animate: false }); });
+setTimeout(() => { lmap.invalidateSize({ animate: false }); }, 60);
 
 const STEPS = [
   {
@@ -2031,9 +2048,18 @@ $("#playPause").addEventListener("click", () => playing ? pause() : play());
 $("#nextStep").addEventListener("click", () => { pause(); nextStep(); });
 $("#prevStep").addEventListener("click", () => { pause(); prevStep(); });
 $("#speedToggle").addEventListener("click", cycleSpeed);
-$("#restart").addEventListener("click", () => { pause(); gotoStep(0); });
+function resetMapView() { lmap.setView(MAP_INIT_CENTRE, MAP_INIT_ZOOM, { animate: true }); }
+$("#resetMap").addEventListener("click", resetMapView);
+$("#restart").addEventListener("click", () => { pause(); gotoStep(0); resetMapView(); });
 $("#jumpBefore").addEventListener("click", () => { pause(); gotoStep(3); });   // T+12: REC-001 approved (pre-shift)
 $("#jumpAfter").addEventListener("click",  () => { pause(); gotoStep(7); });   // T+35: post-shift executions
+
+/* ----- Keep inspectors pinned to their elements during pan/zoom ----- */
+lmap.on('move zoom', () => {
+  if (currentInspected)   positionInspector(currentInspected);
+  if (currentEWUnit)      positionEWInspector(currentEWUnit);
+  if (currentSupportUnit) positionSupportInspector(currentSupportUnit);
+});
 
 /* ----- Banner close / reopen ----- */
 $("#bannerClose").addEventListener("click", () => {
