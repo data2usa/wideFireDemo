@@ -466,6 +466,64 @@
   .support-g.active .s-hlabel { fill: #59d39e; opacity: 1; }
   .support-g.redeploying .s-hlabel { fill: var(--warn); opacity: 0.9; }
 
+  /* ================================================================
+     RESPONSIVE
+     ================================================================ */
+
+  #feedToggle { display: none; }
+
+  /* Tablet landscape ≤ 1280px — tighten side panels */
+  @media (max-width: 1280px) {
+    main { grid-template-columns: 260px 1fr 300px; }
+  }
+
+  /* Tablet portrait / small laptop ≤ 960px — drop right panel */
+  @media (max-width: 960px) {
+    main { grid-template-columns: 220px 1fr; }
+    aside { display: none; }
+    .fb-title { font-size: 30px; }
+    .fb-detail { font-size: 17px; }
+  }
+
+  /* Small tablet / large phone ≤ 768px — map-first layout */
+  @media (max-width: 768px) {
+    body { grid-template-rows: auto 1fr auto; }
+    header { flex-wrap: wrap; height: auto; padding: 10px 14px; min-height: 56px; }
+    .title .sub { display: none; }
+    #jumpBefore, #jumpAfter, #resetMap { display: none; }
+    #feedToggle { display: inline-flex; }
+    main { grid-template-columns: 1fr; }
+    aside { display: none; }
+    #leftPanel {
+      position: fixed; top: 0; left: 0; bottom: 0;
+      width: min(320px, 90vw); z-index: 100;
+      transform: translateX(-100%);
+      transition: transform .3s ease;
+      box-shadow: 4px 0 24px rgba(0,0,0,.5);
+    }
+    #leftPanel.open { transform: translateX(0); }
+    .fb-title { font-size: 22px; }
+    .fb-detail { font-size: 14px; }
+    .fb-time { font-size: 16px; }
+    .map-banner { padding: 12px 40px 12px 16px; gap: 14px; right: 12px; }
+    .footer-controls { padding: 10px 12px; gap: 10px; }
+    .timeline { height: 58px; }
+    .timeline-label { font-size: 9px; }
+    .play-controls button { width: 32px; height: 32px; }
+  }
+
+  /* Phone portrait ≤ 480px */
+  @media (max-width: 480px) {
+    .title h1 { font-size: 13px; }
+    #liveBadge { display: none; }
+    .btn { padding: 5px 8px; font-size: 11px; }
+    .fb-title { font-size: 18px; }
+    .fb-detail { font-size: 13px; }
+    .map-banner { padding: 10px 36px 10px 12px; gap: 10px; }
+    .timeline-label { display: none; }
+    .map-style-pick { top: auto; bottom: 12px; right: 48px; }
+  }
+
 </style>
 </head>
 <body>
@@ -485,6 +543,7 @@
     <button class="btn" id="resetMap" title="Reset map to default view">⊙ reset map</button>
     <button class="btn" id="jumpBefore">↦ before shift</button>
     <button class="btn" id="jumpAfter">↦ after shift</button>
+    <button class="btn" id="feedToggle">☰ feed</button>
     <button class="btn primary" id="restart">↺ restart</button>
   </div>
 </header>
@@ -2087,6 +2146,15 @@ $("#mapWrap").addEventListener("click", (e) => {
   if (e.target.closest(".cube-g")) return;
   if (e.target.closest(".support-g")) return;
   closeInspector();
+});
+
+/* ----- Feed panel toggle (mobile) ----- */
+$("#feedToggle").addEventListener("click", (e) => {
+  e.stopPropagation();
+  $("#leftPanel").classList.toggle("open");
+});
+$("#mapWrap").addEventListener("click", () => {
+  $("#leftPanel").classList.remove("open");
 });
 
 /* ----- Init ----- */
