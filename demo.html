@@ -1,0 +1,2077 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bear Creek Fire — EdgeWorks + reView demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<style>
+  :root {
+    --bg: #0b1015;
+    --bg-2: #121922;
+    --bg-3: #1a232f;
+    --line: #233042;
+    --ink: #e6edf6;
+    --ink-2: #9aa8bd;
+    --ink-3: #6c7a92;
+    --fire: #ff5a2c;
+    --fire-2: #ffb55a;
+    --fire-3: #7a1f0a;
+    --ok: #59d39e;
+    --warn: #f1c447;
+    --bad: #ff5a6e;
+    --cube: #4ad0ff;
+    --cube-dim: #1e4a63;
+    --wind: #33e660;
+    --phosphor: #33e660;
+    --shadow: 0 8px 24px rgba(0,0,0,.4);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); height: 100%; overflow: hidden; }
+  body { display: grid; grid-template-rows: 56px 1fr 110px; height: 100vh; }
+
+  /* HEADER */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--bg-2);
+  }
+  .title { display: flex; align-items: baseline; gap: 14px; }
+  .title h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .2px; }
+  .title .sub { color: var(--ink-3); font-size: 12px; font-family: var(--mono); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+           background: var(--bg-3); border: 1px solid var(--line); font-size: 11px; color: var(--ink-2); font-family: var(--mono); }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fire); box-shadow: 0 0 12px var(--fire); }
+
+  .nav { display: flex; gap: 8px; }
+  button.btn {
+    background: var(--bg-3); color: var(--ink); border: 1px solid var(--line);
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: var(--mono);
+  }
+  button.btn:hover { border-color: var(--cube); color: var(--cube); }
+  button.btn.primary { background: var(--fire); color: #0b1015; border-color: var(--fire); }
+  button.btn.primary:hover { background: var(--fire-2); border-color: var(--fire-2); color: #0b1015; }
+
+  /* Toggle switch */
+  .toggle { display: inline-flex; align-items: center; gap: 8px; user-select: none; cursor: pointer;
+            font-size: 11px; color: var(--ink-2); font-family: var(--mono); }
+  .toggle input { display: none; }
+  .toggle .track {
+    width: 32px; height: 18px; background: var(--bg-3); border: 1px solid var(--line);
+    border-radius: 999px; position: relative; transition: background .2s, border-color .2s;
+  }
+  .toggle .track::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--ink-3); transition: left .2s, background .2s;
+  }
+  .toggle input:checked + .track { background: rgba(74,208,255,.15); border-color: var(--cube); }
+  .toggle input:checked + .track::after { left: 16px; background: var(--cube); }
+
+  /* MAIN GRID */
+  main { display: grid; grid-template-columns: 320px 1fr 340px; min-height: 0; }
+  #mapWrap { position: relative; background:
+              radial-gradient(1200px 800px at 30% 30%, #18222e 0%, #0c1218 60%, #07090d 100%); overflow: hidden;
+              transition: background .3s; }
+  #mapWrap.no-bg { background: var(--bg); }
+  #mapWrap.no-bg .ridge, #mapWrap.no-bg .river { opacity: 0; }
+  .ridge, .river { transition: opacity .3s; }
+
+  #basemap {
+    position: absolute; inset: 0; z-index: 1;
+    transition: opacity .3s, filter .3s;
+  }
+  #basemap .leaflet-control-attribution {
+    background: rgba(11,16,21,.7); color: var(--ink-3); font-size: 10px;
+    border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px;
+  }
+  #basemap .leaflet-control-attribution a { color: var(--cube); }
+  /* Tint satellite tiles slightly to fit dark UI */
+  #basemap .leaflet-tile { filter: saturate(.85) brightness(.78) contrast(1.05); }
+  #mapWrap.no-bg #basemap { opacity: 0; pointer-events: none; }
+  svg.map { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+  svg.map .cube-g, svg.map .asset-g, svg.map .a-shape, svg.map .asset-line, svg.map .a-label, svg.map .support-g { pointer-events: auto; }
+  .legend, .pop-card, .inspector { z-index: 10; }
+
+  /* Basemap style selector */
+  .map-style-pick {
+    position: absolute; top: 12px; right: 12px; z-index: 10;
+    display: flex; gap: 4px; padding: 4px;
+    background: rgba(11,16,21,.85); border: 1px solid var(--line); border-radius: 8px;
+    backdrop-filter: blur(8px);
+  }
+  .map-style-pick button {
+    background: transparent; border: 1px solid transparent; color: var(--ink-2);
+    padding: 4px 9px; border-radius: 5px; font-size: 10px; font-family: var(--mono);
+    cursor: pointer; text-transform: uppercase; letter-spacing: .5px;
+  }
+  .map-style-pick button:hover { color: var(--ink); border-color: var(--line); }
+  .map-style-pick button.active { background: var(--cube); color: #0b1015; border-color: var(--cube); }
+  svg.map { width: 100%; height: 100%; display: block; }
+  .legend {
+    position: absolute; left: 16px; bottom: 16px; padding: 10px 12px;
+    background: rgba(11,16,21,.75); border: 1px solid var(--line); border-radius: 8px; font-size: 11px;
+    backdrop-filter: blur(6px); color: var(--ink-2); font-family: var(--mono); line-height: 1.65;
+  }
+  .legend .row { display: flex; align-items: center; gap: 8px; }
+  .legend .li { flex-shrink: 0; display: block; }
+  .legend hr { border: none; border-top: 1px solid var(--line); margin: 5px 0; }
+
+  /* RIGHT PANEL */
+  aside {
+    background: var(--bg-2); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .panel-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-2); }
+  .panel-head .clock { font-family: var(--mono); font-size: 12px; color: var(--fire-2); }
+
+  .event-card {
+    padding: 16px 20px; border-bottom: 1px solid var(--line);
+    border-left: 3px solid transparent;
+    transition: background .3s;
+  }
+  .event-card .when { font-family: var(--mono); font-size: 12px; color: var(--ink-3); letter-spacing: .3px; }
+  .event-card .what { font-size: 17px; margin: 8px 0 9px; font-weight: 700; line-height: 1.3; color: var(--ink); }
+  .event-card .why  { font-size: 13px; color: var(--ink-2); line-height: 1.65; }
+  .event-card.high  { border-left-color: var(--fire); background: rgba(255,90,44,.04); }
+  /* Latest event always gets a subtle glow */
+  .event-card:first-child { border-left-color: var(--cube); background: rgba(74,208,255,.04); }
+  .event-card.high:first-child { border-left-color: var(--fire); background: rgba(255,90,44,.07); }
+
+  /* Event type badge */
+  .ev-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; font-family: var(--mono); font-weight: 700; letter-spacing: .6px;
+    margin-bottom: 4px;
+  }
+  .ev-fire   { background: rgba(255,90,44,.18);  color: #ff8060; border: 1px solid rgba(255,90,44,.35); }
+  .ev-wind   { background: rgba(255,90,44,.22);  color: #ffb55a; border: 1px solid rgba(255,181,90,.5); }
+  .ev-smoke  { background: rgba(255,181,90,.15); color: #ffb55a; border: 1px solid rgba(255,181,90,.3); }
+  .ev-spread { background: rgba(255,181,90,.12); color: #ffd080; border: 1px solid rgba(255,181,90,.28); }
+  .ev-rec    { background: rgba(74,208,255,.1);  color: var(--cube); border: 1px solid rgba(74,208,255,.25); }
+  .ev-exec   { background: rgba(74,208,255,.08); color: var(--cube); border: 1px solid rgba(74,208,255,.2); }
+  .ev-ok     { background: rgba(89,211,158,.1);  color: #59d39e; border: 1px solid rgba(89,211,158,.25); }
+  .ev-audit  { background: rgba(89,211,158,.08); color: #59d39e; border: 1px solid rgba(89,211,158,.2); }
+  .ev-info   { background: var(--bg-3); color: var(--ink-3); border: 1px solid var(--line); }
+
+  /* Support asset panel */
+  .support-list { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .sup-card {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 6px 8px; border-radius: 6px; background: var(--bg-3);
+    border: 1px solid var(--line); transition: all .35s;
+  }
+  .sup-card.active { border-color: #59d39e; background: rgba(89,211,158,.06); }
+  .sup-card.redeploying { border-color: var(--warn); background: rgba(241,196,71,.06); }
+  .sup-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+    background: var(--ink-3); transition: background .35s;
+  }
+  .sup-card.active .sup-dot { background: #59d39e; box-shadow: 0 0 6px rgba(89,211,158,.5); }
+  .sup-card.redeploying .sup-dot { background: var(--warn); box-shadow: 0 0 5px rgba(241,196,71,.4); }
+  .sup-name { font-size: 11px; font-weight: 600; font-family: var(--mono); color: var(--ink-2); transition: color .35s; }
+  .sup-card.active .sup-name { color: #59d39e; }
+  .sup-card.redeploying .sup-name { color: var(--warn); }
+  .sup-role { font-size: 10px; color: var(--ink-3); line-height: 1.4; }
+
+  .section-title { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+                  color: var(--ink-3); padding: 14px 18px 8px; }
+
+  .assets { padding: 0 12px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .asset {
+    background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; transition: all .35s ease;
+  }
+  .asset .a-name { font-size: 12px; font-weight: 600; }
+  .asset .a-sub { font-size: 10px; color: var(--ink-3); font-family: var(--mono); margin-top: 2px; }
+  .asset.risk {
+    border-color: var(--fire); background: linear-gradient(180deg, rgba(255,90,44,.15), rgba(255,90,44,.05));
+    box-shadow: 0 0 0 1px rgba(255,90,44,.3), 0 0 16px rgba(255,90,44,.15);
+  }
+  .asset.risk .a-name { color: var(--fire-2); }
+  .asset.risk::before {
+    content: "●"; color: var(--fire); margin-right: 5px; animation: pulse 1.4s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  .feed { flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px; }
+  .feed::-webkit-scrollbar { width: 6px; }
+  .feed::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+  /* LEFT INCIDENT FEED PANEL */
+  #leftPanel {
+    background: var(--bg-2); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .left-head {
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    background: var(--bg-2);
+  }
+  .left-head h2 {
+    margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .left-head .clock {
+    font-family: var(--mono); font-size: 22px; font-weight: 700;
+    color: var(--fire-2); letter-spacing: 1px;
+  }
+
+  /* TIMELINE FOOTER */
+  footer { background: var(--bg-2); border-top: 1px solid var(--line); display: flex; }
+
+  /* Map-top incident banner */
+  .map-banner {
+    position: absolute; top: 12px; left: 12px; right: 220px; z-index: 10;
+    padding: 20px 48px 20px 32px;
+    background: rgba(11,16,21,.92); border: 1px solid var(--line); border-radius: 12px;
+    backdrop-filter: blur(12px);
+    display: flex; align-items: flex-start; gap: 24px;
+  }
+  .fb-meta { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; align-items: flex-start; padding-top: 4px; }
+  .fb-time { font-family: var(--mono); font-size: 22px; color: var(--ink-3); letter-spacing: .5px; }
+  .map-banner .ev-badge { font-size: 14px; padding: 4px 12px; letter-spacing: .8px; }
+  .fb-content { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .fb-title { font-size: 42px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+  .fb-detail { font-size: 22px; color: var(--ink-2); line-height: 1.4; font-family: var(--mono); }
+
+  /* Banner close / reopen */
+  .banner-close {
+    position: absolute; top: 12px; right: 14px;
+    background: transparent; border: none; color: var(--ink-3);
+    font-size: 22px; cursor: pointer; line-height: 1; padding: 2px 6px;
+  }
+  .banner-close:hover { color: var(--ink); }
+  .banner-reopen {
+    position: absolute; top: 12px; left: 12px; z-index: 10;
+    display: none; align-items: center; gap: 8px;
+    background: rgba(11,16,21,.88); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 16px; color: var(--ink-2); font-size: 13px; font-family: var(--mono);
+    cursor: pointer; backdrop-filter: blur(8px);
+  }
+  .banner-reopen:hover { color: var(--ink); border-color: var(--cube); }
+
+  /* Footer controls row (single row now banner is on map) */
+  .footer-controls { display: flex; gap: 18px; align-items: center; padding: 14px 22px; flex: 1; min-height: 0; }
+  .play-controls { display: flex; gap: 8px; align-items: center; }
+  .play-controls button { width: 36px; height: 36px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .speed { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+
+  .timeline { flex: 1; position: relative; height: 70px; }
+  .timeline-track {
+    position: absolute; left: 0; right: 0; top: 35px; height: 2px; background: var(--line); border-radius: 1px;
+  }
+  .timeline-progress {
+    position: absolute; left: 0; top: 35px; height: 2px;
+    background: linear-gradient(90deg, var(--cube), var(--fire)); border-radius: 1px;
+  }
+  .timeline-mark {
+    position: absolute; top: 24px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg-3);
+    border: 2px solid var(--line); transform: translateX(-50%); cursor: pointer; transition: all .25s;
+  }
+  .timeline-mark.passed { background: var(--cube); border-color: var(--cube); box-shadow: 0 0 10px rgba(74,208,255,.5); }
+  .timeline-mark.shift { width: 16px; height: 16px; top: 22px; }
+  .timeline-mark.shift.passed { background: var(--fire); border-color: var(--fire); box-shadow: 0 0 14px rgba(255,90,44,.7); }
+  .timeline-mark.current { transform: translateX(-50%) scale(1.4); }
+  .timeline-label {
+    position: absolute; top: 0; transform: translateX(-50%); font-family: var(--mono); font-size: 10px;
+    color: var(--ink-3); white-space: nowrap; pointer-events: none;
+  }
+  .timeline-label.shift { color: var(--fire-2); font-weight: 600; }
+  .timeline-mark:hover .timeline-label { color: var(--ink); }
+
+  /* MAP ELEMENTS */
+  .cube-g .cube-box { fill: var(--cube-dim); stroke: var(--cube); stroke-width: 1.5; }
+  .cube-g.active .cube-box { fill: var(--cube); }
+  .cube-g .cube-label { fill: var(--ink-2); font-family: var(--mono); font-size: 10px; }
+  .cube-g.detecting .cube-box { fill: var(--fire); stroke: var(--fire-2); animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .55; } }
+
+  .wind-arrow { stroke: var(--wind); stroke-width: 1.5; fill: none; opacity: .9;
+                marker-end: url(#windhead); transition: all 1.2s cubic-bezier(.45,.05,.2,1); transform-origin: center; transform-box: fill-box; }
+
+  .asset-g .a-shape { fill: var(--bg-3); stroke: rgba(51,230,96,.55); stroke-width: 1.2; transition: all .4s; }
+  .asset-g.risk .a-shape { fill: var(--fire-3); stroke: var(--fire); stroke-width: 2;
+                          filter: drop-shadow(0 0 8px rgba(255,90,44,.7)); }
+  .asset-g .a-label { fill: rgba(51,230,96,.7); font-family: var(--mono); font-size: 9px; }
+  .asset-g.risk .a-label { fill: var(--fire-2); font-weight: 600; }
+  .asset-line { stroke: rgba(51,230,96,.45); stroke-width: 2; fill: none; transition: stroke .4s; }
+  .asset-line.risk { stroke: var(--fire); filter: drop-shadow(0 0 6px rgba(255,90,44,.6)); }
+  .asset-g.risk .asset-line { stroke: var(--fire); filter: drop-shadow(0 0 6px rgba(255,90,44,.6)); }
+  .asset-g .a-cross { stroke: rgba(51,230,96,.65); fill: none; stroke-linecap: round; pointer-events: none; transition: stroke .4s; }
+  .asset-g.risk .a-cross { stroke: var(--fire-2); }
+
+  .fire-dot {
+    fill: var(--fire);
+    filter: drop-shadow(0 0 12px var(--fire));
+    animation: firePulse 1.6s infinite;
+  }
+  @keyframes firePulse { 0%,100% { r: 8; } 50% { r: 11; } }
+
+  .spread-cone {
+    fill: url(#coneGradient);
+    stroke: var(--fire);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    opacity: 0;
+    transition: opacity .6s, transform 1.4s cubic-bezier(.55,.05,.2,1);
+    transform-origin: var(--ox, 0) var(--oy, 0);
+  }
+  .spread-cone.show { opacity: 1; }
+
+  .ridge { fill: none; stroke: #1b2937; stroke-width: 30; stroke-linecap: round; opacity: .55; }
+  .river { fill: none; stroke: #0e2536; stroke-width: 4; stroke-linecap: round; opacity: .8; }
+
+  .pop-card {
+    position: absolute; pointer-events: none; padding: 8px 12px;
+    background: rgba(11,16,21,.92); border: 1px solid var(--fire); border-radius: 8px;
+    color: var(--ink); font-size: 12px; font-family: var(--mono);
+    box-shadow: var(--shadow); opacity: 0; transform: translate(-50%, -120%);
+    transition: opacity .35s; white-space: nowrap;
+  }
+  .pop-card.show { opacity: 1; }
+  .pop-card .pop-title { color: var(--fire-2); font-weight: 600; margin-bottom: 2px; }
+
+  .asset-g .a-shape, .asset-g .asset-line, .asset-g .a-label { cursor: pointer; }
+  .asset.click { cursor: pointer; }
+  .asset.click:hover { border-color: var(--cube); }
+
+  /* Inspector modal-ish card (click-driven, persistent) */
+  .inspector {
+    position: absolute; pointer-events: auto;
+    min-width: 280px; max-width: 340px; padding: 0;
+    background: rgba(11,16,21,.96); border: 1px solid var(--line); border-radius: 10px;
+    color: var(--ink); font-size: 12px; box-shadow: var(--shadow);
+    opacity: 0; transform: translate(-50%, calc(-100% - 16px));
+    transition: opacity .25s ease, transform .25s ease;
+    z-index: 20; backdrop-filter: blur(8px);
+  }
+  .inspector.show { opacity: 1; }
+  .inspector.risk { border-color: var(--fire); box-shadow: 0 0 0 1px rgba(255,90,44,.3), var(--shadow); }
+  .inspector .ins-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+  }
+  .inspector .ins-name { font-weight: 600; font-size: 13px; }
+  .inspector.risk .ins-name { color: var(--fire-2); }
+  .inspector .ins-close {
+    background: transparent; border: none; color: var(--ink-3); cursor: pointer;
+    font-size: 16px; padding: 0 4px; line-height: 1;
+  }
+  .inspector .ins-close:hover { color: var(--ink); }
+  .inspector .ins-body { padding: 12px 14px; }
+  .inspector .ins-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-family: var(--mono); font-size: 11px; }
+  .inspector .ins-row .k { color: var(--ink-3); }
+  .inspector .ins-row .v { color: var(--ink); text-align: right; }
+  .inspector .ins-row .v.risk { color: var(--fire-2); }
+  .inspector .ins-row .v.ok   { color: var(--ok); }
+  .inspector .ins-risk {
+    margin-top: 10px; padding: 10px 12px;
+    background: linear-gradient(180deg, rgba(255,90,44,.12), rgba(255,90,44,.02));
+    border: 1px solid rgba(255,90,44,.4); border-radius: 6px;
+  }
+  .inspector .ins-risk .label { font-family: var(--mono); font-size: 10px; color: var(--fire-2); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 4px; }
+  .inspector .ins-risk .reason { font-size: 12px; line-height: 1.45; color: var(--ink); }
+  .inspector .ins-risk .meta { font-family: var(--mono); font-size: 10px; color: var(--ink-3); margin-top: 6px; }
+  .inspector .ins-safe {
+    margin-top: 10px; padding: 8px 12px;
+    background: rgba(89,211,158,.08); border: 1px solid rgba(89,211,158,.3); border-radius: 6px;
+    font-size: 11px; color: var(--ok); font-family: var(--mono);
+  }
+  .inspector .ins-actions { margin-top: 10px; }
+  .inspector .ins-actions .lbl { font-size: 10px; color: var(--ink-3); font-family: var(--mono); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 6px; }
+  .inspector .ins-actions .item {
+    font-family: var(--mono); font-size: 11px; padding: 3px 0;
+    color: var(--ink-2);
+  }
+  .inspector .ins-actions .item .tag {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    background: var(--bg-3); border: 1px solid var(--line); color: var(--cube); margin-right: 6px;
+  }
+
+  /* Highlight the active inspected asset */
+  .asset-g.inspected .a-shape { stroke: var(--cube); stroke-width: 2.5; filter: drop-shadow(0 0 6px rgba(74,208,255,.6)); }
+  .asset.inspected { border-color: var(--cube); box-shadow: 0 0 0 1px rgba(74,208,255,.4); }
+  .cube-g.inspected .cube-box { stroke: white; stroke-width: 2.5; filter: drop-shadow(0 0 6px rgba(255,255,255,.6)); }
+  .support-g.inspected .s-shape { stroke: white !important; stroke-width: 2.5 !important; opacity: 1 !important;
+                                   filter: drop-shadow(0 0 8px rgba(255,255,255,.65)) !important; }
+  .sup-card.inspected { border-color: var(--cube) !important; box-shadow: 0 0 0 1px rgba(74,208,255,.3); }
+
+  /* Support asset inspector — state-aware colour theme */
+  .inspector.support-asset                    { border-color: var(--ink-3); }
+  .inspector.support-asset .ins-name          { color: var(--ink-2); }
+  .inspector.support-asset.active             { border-color: #59d39e; box-shadow: 0 0 0 1px rgba(89,211,158,.2), var(--shadow); }
+  .inspector.support-asset.active .ins-name   { color: #59d39e; }
+  .inspector.support-asset.redeploying        { border-color: var(--warn); }
+  .inspector.support-asset.redeploying .ins-name { color: var(--warn); }
+
+  /* State badge inside support inspector */
+  .sup-badge { display: inline-block; padding: 2px 9px; border-radius: 4px; font-size: 10px;
+               font-family: var(--mono); font-weight: 700; letter-spacing: .5px; margin-bottom: 8px; }
+  .sup-badge.active     { background: rgba(89,211,158,.15); color: #59d39e; border: 1px solid rgba(89,211,158,.3); }
+  .sup-badge.redeploying{ background: rgba(241,196,71,.15);  color: var(--warn); border: 1px solid rgba(241,196,71,.3); }
+  .sup-badge.standby    { background: var(--bg-3); color: var(--ink-3); border: 1px solid var(--line); }
+
+  /* EdgeWorks unit inspector — distinct cyan theme */
+  .inspector.ew-unit { border-color: var(--cube); }
+  .inspector.ew-unit .ins-name { color: var(--cube); }
+  .inspector.ew-unit .ins-head { border-bottom-color: rgba(74,208,255,.2); }
+  .ew-sensor-table { width: 100%; border-collapse: collapse; margin: 0; }
+  .ew-sensor-table td { padding: 4px 0; font-size: 11px; vertical-align: top; }
+  .ew-sensor-table td:first-child { color: var(--ink-3); width: 110px; font-family: var(--mono); }
+  .ew-sensor-table td:last-child { color: var(--ink); font-family: var(--mono); }
+  .ew-sensor-table tr.alert td:last-child { color: var(--fire-2); font-weight: 600; }
+  .ew-detection { font-size: 10px; color: var(--fire-2); font-family: var(--mono); padding: 2px 0; }
+  .ew-iface { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px;
+              font-family: var(--mono); background: rgba(74,208,255,.1); border: 1px solid rgba(74,208,255,.25);
+              color: var(--cube); margin: 2px 2px 0 0; }
+
+  /* SUPPORT ASSETS */
+  .support-g .s-shape {
+    fill: var(--bg-3); stroke: var(--phosphor); stroke-width: 1.2;
+    transition: all .4s; opacity: 0.55;
+  }
+  .support-g.active .s-shape {
+    fill: #0d3326; stroke: #59d39e; stroke-width: 2; opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(89,211,158,.45));
+  }
+  .support-g.redeploying .s-shape {
+    fill: #2a2010; stroke: var(--warn); stroke-width: 1.5; opacity: 0.9;
+    filter: drop-shadow(0 0 4px rgba(241,196,71,.35));
+  }
+  .support-g .s-label {
+    fill: var(--phosphor); font-family: var(--mono); font-size: 9px; opacity: 0.55;
+  }
+  .support-g.active .s-label { fill: #59d39e; opacity: 1; font-weight: 600; }
+  .support-g.redeploying .s-label { fill: var(--warn); opacity: 0.9; }
+  .support-g .s-hlabel {
+    fill: var(--phosphor); font-family: var(--mono); font-size: 8px; font-weight: 700;
+    text-anchor: middle; opacity: 0.55;
+  }
+  .support-g.active .s-hlabel { fill: #59d39e; opacity: 1; }
+  .support-g.redeploying .s-hlabel { fill: var(--warn); opacity: 0.9; }
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">
+    <h1>Bear Creek Fire — coordinated response</h1>
+    <span class="sub">EdgeWorks × reView · wildFire scenario</span>
+  </div>
+  <div class="nav">
+    <span id="liveBadge" class="badge"><span class="dot"></span><span>FIRE-BEAR-001 active</span></span>
+    <label class="toggle" title="Toggle terrain background">
+      <input type="checkbox" id="bgToggle" checked />
+      <span class="track"></span>
+      <span>map</span>
+    </label>
+    <button class="btn" id="jumpBefore">↦ before shift</button>
+    <button class="btn" id="jumpAfter">↦ after shift</button>
+    <button class="btn primary" id="restart">↺ restart</button>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT: Prominent incident feed -->
+  <div id="leftPanel">
+    <div class="left-head">
+      <h2>Incident Feed</h2>
+      <span class="clock" id="clock">T+00:00</span>
+    </div>
+    <div id="feed" class="feed"></div>
+  </div>
+
+  <div id="mapWrap">
+    <div id="basemap"></div>
+    <div class="map-style-pick" id="styleP">
+      <button data-style="satellite" class="active">Satellite</button>
+      <button data-style="topo">Topo</button>
+      <button data-style="dark">Dark</button>
+    </div>
+    <svg class="map" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <radialGradient id="coneGradient" cx="0" cy="50%" r="100%">
+          <stop offset="0%" stop-color="#ff5a2c" stop-opacity=".55"/>
+          <stop offset="60%" stop-color="#ff5a2c" stop-opacity=".18"/>
+          <stop offset="100%" stop-color="#ff5a2c" stop-opacity="0"/>
+        </radialGradient>
+        <marker id="windhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 Z" fill="#33e660"/>
+        </marker>
+        <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#1f2c3a" stroke-width="2"/>
+        </pattern>
+      </defs>
+
+      <!-- Spread cone (rotates on wind shift). Center at fire ignition (359, 176). -->
+      <g id="cone" style="--ox:359px; --oy:176px;">
+        <path id="conePath" class="spread-cone" d="M 0 0 L 270 -110 A 290 290 0 0 1 270 110 Z"/>
+      </g>
+
+      <!-- ATCO line LINE-NE-7 -->
+      <g class="asset-g" id="asset-LINE-NE-7" data-asset="LINE-NE-7">
+        <line class="asset-line" x1="374" y1="148" x2="555" y2="476"/>
+        <circle class="a-shape" cx="465" cy="312" r="4"/>
+        <text class="a-label" x="475" y="316">LINE-NE-7</text>
+      </g>
+
+      <!-- HWY-11-N -->
+      <g class="asset-g" id="asset-HWY-11-N" data-asset="HWY-11-N">
+        <line class="asset-line" x1="488" y1="284" x2="503" y2="20"/>
+        <text class="a-label" x="513" y="32">HWY-11-N</text>
+      </g>
+      <!-- HWY-11-S -->
+      <g class="asset-g" id="asset-HWY-11-S" data-asset="HWY-11-S">
+        <line class="asset-line" x1="488" y1="284" x2="477" y2="585"/>
+        <text class="a-label" x="487" y="595">HWY-11-S</text>
+      </g>
+
+      <!-- Fire ignition -->
+      <g>
+        <circle class="fire-dot" cx="359" cy="176" r="9"/>
+        <text x="374" y="172" fill="#ffb55a" font-family="ui-monospace,monospace" font-size="11" font-weight="600">FIRE-BEAR-001</text>
+      </g>
+
+      <!-- Assets (points) -->
+      <!-- TOWN-BEAR: house/community pentagon shape -->
+      <g class="asset-g" id="asset-TOWN-BEAR" data-asset="TOWN-BEAR">
+        <polygon class="a-shape" points="488,269 502,279 502,296 474,296 474,279"/>
+        <text class="a-label" x="505" y="289">TOWN-BEAR</text>
+      </g>
+      <g class="asset-g" id="asset-SUB-BEAR-1" data-asset="SUB-BEAR-1">
+        <polygon class="a-shape" points="527,316 539,328 527,340 515,328"/>
+        <text class="a-label" x="545" y="332">SUB-BEAR-1</text>
+      </g>
+      <!-- GAS-REG-3: flat hexagon (gas/pressure vessel icon) -->
+      <g class="asset-g" id="asset-GAS-REG-3" data-asset="GAS-REG-3">
+        <polygon class="a-shape" points="505,356 502,350 494,350 491,356 494,362 502,362"/>
+        <text class="a-label" x="511" y="361">GAS-REG-3</text>
+      </g>
+      <g class="asset-g" id="asset-STAGE-1" data-asset="STAGE-1">
+        <polygon class="a-shape" points="307,290 319,308 295,308"/>
+        <text class="a-label" x="245" y="324">STAGE-1</text>
+      </g>
+      <!-- COMMS-TOWER-2: vertical diamond (broadcast tower) -->
+      <g class="asset-g" id="asset-COMMS-TOWER-2" data-asset="COMMS-TOWER-2">
+        <polygon class="a-shape" points="452,415 459,423 452,432 445,423"/>
+        <text class="a-label" x="463" y="428">COMMS-TOWER-2</text>
+      </g>
+
+      <!-- Highway 3 (Crowsnest) — E-W through valley -->
+      <g class="asset-g" id="asset-HWY-3" data-asset="HWY-3">
+        <line class="asset-line" x1="80" y1="275" x2="720" y2="258"/>
+        <text class="a-label" x="88" y="270">HWY-3</text>
+      </g>
+
+      <!-- Bear Creek Health Centre: rect + bold cross -->
+      <g class="asset-g" id="asset-BEAR-HOSPITAL" data-asset="BEAR-HOSPITAL">
+        <rect class="a-shape" x="513" y="73" width="22" height="22" rx="3"/>
+        <path class="a-cross" d="M524,78 v12 M518,84 h12" stroke-width="2.5"/>
+        <text class="a-label" x="539" y="87">BEAR-HOSPITAL</text>
+      </g>
+
+      <!-- Bear Creek K-12 School: octagon (school-zone shape) -->
+      <g class="asset-g" id="asset-BEAR-SCHOOL" data-asset="BEAR-SCHOOL">
+        <polygon class="a-shape" points="447,105 455,108 458,116 455,124 447,127 439,124 436,116 439,108"/>
+        <text class="a-label" x="462" y="120">BEAR-SCHOOL</text>
+      </g>
+
+      <!-- South Valley Hamlet: small house/community pentagon -->
+      <g class="asset-g" id="asset-SOUTH-HAMLET" data-asset="SOUTH-HAMLET">
+        <polygon class="a-shape" points="441,351 452,359 452,375 430,375 430,359"/>
+        <text class="a-label" x="456" y="369">SOUTH-HAMLET</text>
+      </g>
+
+      <!-- Bear Creek Water Works: teardrop/water-drop path -->
+      <g class="asset-g" id="asset-WATER-TREAT" data-asset="WATER-TREAT">
+        <path class="a-shape" d="M369,298 C378,304 378,317 369,320 C360,317 360,304 369,298Z"/>
+        <text class="a-label" x="382" y="313">WATER-TREAT</text>
+      </g>
+
+      <!-- Support Assets -->
+      <!-- Fire Hall: house/pentagon shape -->
+      <g class="support-g" id="sup-FIRE-HALL-W" data-sup="FIRE-HALL-W">
+        <polygon class="s-shape" points="178,210 188,210 188,222 183,228 178,222"/>
+        <text class="s-label" x="192" y="222">FIRE-HALL-W</text>
+      </g>
+
+      <!-- Reception Centre: rounded rect with tent peak -->
+      <g class="support-g" id="sup-REC-CTR-N" data-sup="REC-CTR-N">
+        <rect class="s-shape" x="640" y="28" width="16" height="16" rx="2"/>
+        <text class="s-label" x="660" y="40">REC-CTR-N</text>
+      </g>
+
+      <!-- Helipad: circle with H label -->
+      <g class="support-g" id="sup-HELIPAD-1" data-sup="HELIPAD-1">
+        <circle class="s-shape" cx="271" cy="260" r="9"/>
+        <text class="s-hlabel" x="271" y="264">H</text>
+        <text class="s-label" x="284" y="264">HELIPAD-1</text>
+      </g>
+
+      <!-- Tanker Fill: small horizontal rect (tank shape) -->
+      <g class="support-g" id="sup-TANKER-FILL-1" data-sup="TANKER-FILL-1">
+        <rect class="s-shape" x="676" y="134" width="16" height="12" rx="6"/>
+        <text class="s-label" x="696" y="143">TANKER-FILL-1</text>
+      </g>
+
+      <!-- Fire Hall S: house pentagon -->
+      <g class="support-g" id="sup-FIRE-HALL-S" data-sup="FIRE-HALL-S">
+        <polygon class="s-shape" points="400,506 410,506 410,518 405,524 400,518"/>
+        <text class="s-label" x="414" y="518">FIRE-HALL-S</text>
+      </g>
+
+      <!-- Reception Centre W -->
+      <g class="support-g" id="sup-REC-CTR-W" data-sup="REC-CTR-W">
+        <rect class="s-shape" x="144" y="308" width="16" height="16" rx="2"/>
+        <text class="s-label" x="88" y="322">REC-CTR-W</text>
+      </g>
+
+      <!-- Helipad 2 -->
+      <g class="support-g" id="sup-HELIPAD-2" data-sup="HELIPAD-2">
+        <circle class="s-shape" cx="281" cy="420" r="9"/>
+        <text class="s-hlabel" x="281" y="424">H</text>
+        <text class="s-label" x="294" y="424">HELIPAD-2</text>
+      </g>
+
+      <!-- Fuel Cache -->
+      <g class="support-g" id="sup-FUEL-CACHE-S" data-sup="FUEL-CACHE-S">
+        <rect class="s-shape" x="506" y="468" width="16" height="16" rx="2"/>
+        <text class="s-label" x="526" y="480">FUEL-CACHE-S</text>
+      </g>
+
+      <!-- Cubes with anemometer wind arrows (Mercator-correct positions) -->
+      <!-- EW-RIDGE-N (338,148) -->
+      <g class="cube-g" id="cube-EW-RIDGE-N" data-cube="EW-RIDGE-N">
+        <rect class="cube-box" x="328" y="138" width="20" height="20" rx="3"/>
+        <text class="cube-label" x="268" y="133">EdgeWorks-Ridge-North</text>
+        <g class="wind-arrow-g" transform="translate(338,148)">
+          <line class="wind-arrow" data-wind="EW-RIDGE-N" x1="0" y1="0" x2="28" y2="0"/>
+        </g>
+      </g>
+      <!-- EW-VALLEY-W (245,316) -->
+      <g class="cube-g" id="cube-EW-VALLEY-W" data-cube="EW-VALLEY-W">
+        <rect class="cube-box" x="235" y="306" width="20" height="20" rx="3"/>
+        <text class="cube-label" x="162" y="301">EdgeWorks-Valley-West</text>
+        <g class="wind-arrow-g" transform="translate(245,316)">
+          <line class="wind-arrow" data-wind="EW-VALLEY-W" x1="0" y1="0" x2="28" y2="0"/>
+        </g>
+      </g>
+      <!-- EW-RIDGE-S (457,484) -->
+      <g class="cube-g" id="cube-EW-RIDGE-S" data-cube="EW-RIDGE-S">
+        <rect class="cube-box" x="447" y="474" width="20" height="20" rx="3"/>
+        <text class="cube-label" x="388" y="509">EdgeWorks-Ridge-South</text>
+        <g class="wind-arrow-g" transform="translate(457,484)">
+          <line class="wind-arrow" data-wind="EW-RIDGE-S" x1="0" y1="0" x2="28" y2="0"/>
+        </g>
+      </g>
+      <!-- EW-TOWN-E (503,276) -->
+      <g class="cube-g" id="cube-EW-TOWN-E" data-cube="EW-TOWN-E">
+        <rect class="cube-box" x="493" y="252" width="20" height="20" rx="3"/>
+        <text class="cube-label" x="518" y="248">EdgeWorks-Town-East</text>
+        <g class="wind-arrow-g" transform="translate(503,262)">
+          <line class="wind-arrow" data-wind="EW-TOWN-E" x1="0" y1="0" x2="28" y2="0"/>
+        </g>
+      </g>
+      <!-- EW-SUB-A (529,332) -->
+      <g class="cube-g" id="cube-EW-SUB-A" data-cube="EW-SUB-A">
+        <rect class="cube-box" x="519" y="370" width="20" height="20" rx="3"/>
+        <text class="cube-label" x="547" y="382">EdgeWorks-Sub-Alpha</text>
+        <g class="wind-arrow-g" transform="translate(529,380)">
+          <line class="wind-arrow" data-wind="EW-SUB-A" x1="0" y1="0" x2="28" y2="0"/>
+        </g>
+      </g>
+    </svg>
+
+    <!-- Map-top incident banner -->
+    <div class="map-banner" id="mapBanner">
+      <div class="fb-meta">
+        <span class="fb-time" id="fbTime">T+00:00</span>
+        <span class="ev-badge ev-info" id="fbBadge">INFO</span>
+      </div>
+      <div class="fb-content">
+        <div class="fb-title" id="fbTitle">—</div>
+        <div class="fb-detail" id="fbDetail"></div>
+      </div>
+      <button class="banner-close" id="bannerClose" title="Hide banner">×</button>
+    </div>
+    <!-- Reopen pill (shown when banner is closed) -->
+    <button class="banner-reopen" id="bannerReopen">
+      <span id="bannerReopenBadge" class="ev-badge ev-info" style="font-size:11px;padding:2px 8px;">INFO</span>
+      <span id="bannerReopenTitle" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</span>
+      <span style="color:var(--ink-3);margin-left:4px;">▾ show</span>
+    </button>
+
+    <div id="popCard" class="pop-card">
+      <div class="pop-title" id="popTitle"></div>
+      <div id="popBody"></div>
+    </div>
+
+    <div id="inspector" class="inspector">
+      <div class="ins-head">
+        <div class="ins-name" id="insName">—</div>
+        <button class="ins-close" id="insClose" title="Close">×</button>
+      </div>
+      <div class="ins-body" id="insBody"></div>
+    </div>
+
+    <div class="legend">
+      <div class="row">
+        <svg class="li" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="1" width="14" height="14" rx="2" fill="#1e4a63" stroke="#4ad0ff" stroke-width="1.5"/>
+          <rect x="4" y="4" width="4" height="4" rx="1" fill="#4ad0ff" opacity="0.6"/>
+          <rect x="9" y="4" width="2" height="2" rx="0.5" fill="#4ad0ff" opacity="0.4"/>
+          <rect x="4" y="9" width="8" height="1.5" rx="0.5" fill="#4ad0ff" opacity="0.3"/>
+        </svg>
+        EdgeWorks unit
+      </div>
+      <div class="row">
+        <svg class="li" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="8" cy="8" r="6" fill="#ff5a2c" opacity="0.2"/>
+          <circle cx="8" cy="8" r="4" fill="#ff5a2c" opacity="0.4"/>
+          <path d="M8,13 C5.5,13 4,11 4.5,9 C5,7.5 6.5,8 7,6.5 C7.5,5 8,3 8,3 C8,3 8.5,5 9,6.5 C9.5,8 11,7.5 11.5,9 C12,11 10.5,13 8,13 Z" fill="#ff5a2c"/>
+          <circle cx="8" cy="10" r="2" fill="#ffb55a"/>
+        </svg>
+        Fire origin
+      </div>
+      <div class="row">
+        <svg class="li" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 2,8 L 14,3 A 13 13 0 0 1 14,13 Z" fill="#ff5a2c" opacity="0.45" stroke="#ff5a2c" stroke-width="0.8" stroke-linejoin="round"/>
+          <circle cx="2" cy="8" r="2" fill="#ff5a2c"/>
+        </svg>
+        Spread cone
+      </div>
+      <div class="row">
+        <svg class="li" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <line x1="1" y1="8" x2="11" y2="8" stroke="#33e660" stroke-width="1.5" stroke-linecap="round"/>
+          <polygon points="10,5 15,8 10,11" fill="#33e660"/>
+        </svg>
+        Wind direction
+      </div>
+      <hr/>
+      <!-- At-risk: house (community) · octagon (school) · diamond (substation) · hexagon (gas) · teardrop (water) -->
+      <div class="row">
+        <svg class="li" width="56" height="16" viewBox="0 0 56 16" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="7,2 12,5 12,14 2,14 2,5"        fill="#7a1f0a" stroke="#ff5a2c" stroke-width="1.5"/>
+          <polygon points="21,2 25,4 27,8 25,12 21,14 17,12 15,8 17,4" fill="#7a1f0a" stroke="#ff5a2c" stroke-width="1.5"/>
+          <polygon points="34,2 40,8 34,14 28,8"           fill="#7a1f0a" stroke="#ff5a2c" stroke-width="1.5"/>
+          <polygon points="55,8 52,3 48,3 45,8 48,13 52,13" fill="#7a1f0a" stroke="#ff5a2c" stroke-width="1.5"/>
+        </svg>
+        Asset · at risk
+      </div>
+      <div class="row">
+        <svg class="li" width="56" height="16" viewBox="0 0 56 16" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="7,2 12,5 12,14 2,14 2,5"        fill="#1a232f" stroke="#33e660" stroke-width="1.5" opacity="0.55"/>
+          <polygon points="21,2 25,4 27,8 25,12 21,14 17,12 15,8 17,4" fill="#1a232f" stroke="#33e660" stroke-width="1.5" opacity="0.55"/>
+          <polygon points="34,2 40,8 34,14 28,8"           fill="#1a232f" stroke="#33e660" stroke-width="1.5" opacity="0.55"/>
+          <polygon points="55,8 52,3 48,3 45,8 48,13 52,13" fill="#1a232f" stroke="#33e660" stroke-width="1.5" opacity="0.55"/>
+        </svg>
+        Asset · safe
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="section-title" style="padding-top:18px">Support Assets in Area</div>
+    <div id="supportList" class="support-list"></div>
+    <div class="section-title">Assets at risk</div>
+    <div id="assetGrid" class="assets"></div>
+  </aside>
+</main>
+
+<footer>
+  <!-- Play controls + timeline -->
+  <div class="footer-controls">
+    <div class="play-controls">
+      <button class="btn" id="prevStep" title="Previous step">◀</button>
+      <button class="btn primary" id="playPause" title="Play/Pause">▶</button>
+      <button class="btn" id="nextStep" title="Next step">▶▶</button>
+      <span class="speed" id="speedLabel">1×</span>
+      <button class="btn" id="speedToggle">speed</button>
+    </div>
+    <div class="timeline" id="timeline">
+      <div class="timeline-track"></div>
+      <div class="timeline-progress" id="timelineProgress"></div>
+      <!-- marks injected by JS -->
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+/* =========================================================================
+   Wildfire scenario - playback model
+   Mirrors the events in events.jsonl / load.cypher in this folder.
+   ========================================================================= */
+
+/* ----- Leaflet basemap ----- */
+/* Bbox sized so the Mercator projection at lat 49.605 matches the SVG's
+   800x600 viewBox aspect (1.333 w/h). The SVG positions are computed for
+   this exact bbox so map tiles align with the unit/asset markers. */
+const MAP_BOUNDS = [[49.5645, -114.5775], [49.6395, -114.4225]];
+
+const TILE_STYLES = {
+  satellite: {
+    url:  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr: "Tiles © Esri — Imagery"
+  },
+  topo: {
+    url:  "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attr: "© OpenStreetMap · OpenTopoMap (CC-BY-SA)"
+  },
+  dark: {
+    url:  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attr: "© OpenStreetMap · © CartoDB"
+  }
+};
+
+const lmap = L.map("basemap", {
+  zoomControl: false, attributionControl: true,
+  dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
+  boxZoom: false, keyboard: false, touchZoom: false, zoomSnap: 0.01
+}).fitBounds(MAP_BOUNDS, { animate: false });
+
+let currentTileLayer = null;
+function setBasemapStyle(key) {
+  const s = TILE_STYLES[key]; if (!s) return;
+  if (currentTileLayer) lmap.removeLayer(currentTileLayer);
+  currentTileLayer = L.tileLayer(s.url, { attribution: s.attr, maxZoom: 19 }).addTo(lmap);
+  document.querySelectorAll(".map-style-pick button").forEach(b => {
+    b.classList.toggle("active", b.getAttribute("data-style") === key);
+  });
+}
+setBasemapStyle("satellite");
+
+document.querySelectorAll(".map-style-pick button").forEach(b => {
+  b.addEventListener("click", () => setBasemapStyle(b.getAttribute("data-style")));
+});
+
+// Keep Leaflet sized to its container and locked to bounds on window resize.
+window.addEventListener("resize", () => {
+  lmap.invalidateSize({ animate: false });
+  lmap.fitBounds(MAP_BOUNDS, { animate: false });
+});
+// Re-fit shortly after init in case fonts/layout settle late.
+setTimeout(() => { lmap.invalidateSize({ animate: false }); lmap.fitBounds(MAP_BOUNDS, { animate: false }); }, 60);
+
+const STEPS = [
+  {
+    tMin: 0, tLabel: "T+00:00",
+    title: "Ignition",
+    detail: "EW-RIDGE-N thermal cam sees 312°C hotspot. fire_detector_v3 fires at 0.94 confidence.",
+    fireDetect: ["EW-RIDGE-N"],
+    pop: { title: "EdgeWorks-Ridge-North · thermal_cam", body: "scene_max = 312°C  →  Fire detected" },
+    wind: null,
+    cone: null,
+    risk: []
+  },
+  {
+    tMin: 3, tLabel: "T+00:03",
+    title: "Smoke corroborated",
+    detail: "EW-VALLEY-W PM2.5 climbs 8 → 95 µg/m³. smoke_classifier_v2 confirms.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    pop: { title: "EdgeWorks-Valley-West · pm_sensor", body: "PM2.5 = 95 µg/m³  →  smoke_present" },
+    wind: null, cone: null, risk: []
+  },
+  {
+    tMin: 5, tLabel: "T+00:05",
+    title: "Initial spread estimate · NE",
+    detail: "5 EdgeWorks units report wind from WSW (~240°). SpreadEstimate-001 projects fire NE at 1.2 m/s. Hospital, school, and town center now in NE cone.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    wind: { "EW-RIDGE-N":240, "EW-VALLEY-W":235, "EW-RIDGE-S":245, "EW-TOWN-E":238, "EW-SUB-A":242 },
+    cone: { bearing: 60, halfAngle: 25, length: 270, label: "RZ-001 · NE" },
+    risk: ["TOWN-BEAR","LINE-NE-7","HWY-11-N","BEAR-HOSPITAL","BEAR-SCHOOL","HWY-3"],
+    pop: { title: "SpreadEstimate · SPREAD-001", body: "vector 060° · 1.2 m/s · RZ-001 active" }
+  },
+  {
+    tMin: 12, tLabel: "T+00:12",
+    title: "REC-FIRE-001 approved",
+    detail: "IC approves: evacuate east sector, prep crews NE, ATCO standby on LINE-NE-7.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    wind: { "EW-RIDGE-N":240, "EW-VALLEY-W":235, "EW-RIDGE-S":245, "EW-TOWN-E":238, "EW-SUB-A":242 },
+    cone: { bearing: 60, halfAngle: 25, length: 270, label: "RZ-001 · NE" },
+    risk: ["TOWN-BEAR","LINE-NE-7","HWY-11-N","BEAR-HOSPITAL","BEAR-SCHOOL","HWY-3"]
+  },
+  {
+    tMin: 28, tLabel: "T+00:28",
+    title: "⚠ Wind shift detected · EW-RIDGE-N",
+    detail: "Anemometer on EW-RIDGE-N: 240° → 305° in 90s. Speed 15 → 22 km/h.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    isShift: true,
+    wind: { "EW-RIDGE-N":305, "EW-VALLEY-W":235, "EW-RIDGE-S":245, "EW-TOWN-E":238, "EW-SUB-A":242 },
+    cone: { bearing: 60, halfAngle: 25, length: 270, label: "RZ-001 · NE" },
+    risk: ["TOWN-BEAR","LINE-NE-7","HWY-11-N","BEAR-HOSPITAL","BEAR-SCHOOL","HWY-3"],
+    pop: { title: "EdgeWorks-Ridge-North · anemometer", body: "dir 240° → 305° · speed 22 km/h · WIND SHIFT" }
+  },
+  {
+    tMin: 30, tLabel: "T+00:30",
+    title: "New spread estimate · SSE",
+    detail: "All 5 EdgeWorks units corroborate (with terrain lag). SpreadEstimate-002 swings to 160°, 1.8 m/s. AT_RISK set turns over — South Hamlet, Water Works, and substation now in cone.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    wind: { "EW-RIDGE-N":305, "EW-VALLEY-W":300, "EW-RIDGE-S":310, "EW-TOWN-E":298, "EW-SUB-A":302 },
+    cone: { bearing: 160, halfAngle: 22, length: 320, label: "RZ-002 · SSE" },
+    risk: ["SUB-BEAR-1","GAS-REG-3","HWY-11-S","COMMS-TOWER-2","STAGE-1","SOUTH-HAMLET","WATER-TREAT","HWY-3"],
+    pop: { title: "SpreadEstimate · SPREAD-002", body: "vector 160° · 1.8 m/s · RZ-002 active" }
+  },
+  {
+    tMin: 32, tLabel: "T+00:32",
+    title: "REC-FIRE-002 SUPERSEDES REC-FIRE-001",
+    detail: "De-energize LINE-NE-7 · isolate GAS-REG-3 · open SUB-BEAR-1 south feeder · relocate STAGE-1 · evac via HWY-11-S. 2 candidates rejected.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    wind: { "EW-RIDGE-N":305, "EW-VALLEY-W":300, "EW-RIDGE-S":310, "EW-TOWN-E":298, "EW-SUB-A":302 },
+    cone: { bearing: 160, halfAngle: 22, length: 320, label: "RZ-002 · SSE" },
+    risk: ["SUB-BEAR-1","GAS-REG-3","HWY-11-S","COMMS-TOWER-2","STAGE-1","SOUTH-HAMLET","WATER-TREAT","HWY-3"]
+  },
+  {
+    tMin: 35, tLabel: "T+00:35",
+    title: "Approvals + 5 executions fan out",
+    detail: "Human approval (IC) for evac/crew. Envelope approval (ATCO) auto-triggered by REGCOND for asset isolations.",
+    fireDetect: ["EW-RIDGE-N","EW-VALLEY-W"],
+    wind: { "EW-RIDGE-N":305, "EW-VALLEY-W":300, "EW-RIDGE-S":310, "EW-TOWN-E":298, "EW-SUB-A":302 },
+    cone: { bearing: 160, halfAngle: 22, length: 320, label: "RZ-002 · SSE" },
+    risk: ["SUB-BEAR-1","GAS-REG-3","HWY-11-S","COMMS-TOWER-2","STAGE-1","SOUTH-HAMLET","WATER-TREAT","HWY-3"]
+  },
+  {
+    tMin: 55, tLabel: "T+00:55",
+    title: "Stabilization",
+    detail: "Wind holds at 310°. Thermal perimeter not advancing. PM2.5 at TOWN-E starts to fall.",
+    fireDetect: ["EW-RIDGE-N"],
+    wind: { "EW-RIDGE-N":310, "EW-VALLEY-W":308, "EW-RIDGE-S":312, "EW-TOWN-E":306, "EW-SUB-A":309 },
+    cone: { bearing: 160, halfAngle: 22, length: 320, label: "RZ-002 · SSE" },
+    risk: ["SUB-BEAR-1","GAS-REG-3","HWY-11-S","COMMS-TOWER-2","STAGE-1","SOUTH-HAMLET","WATER-TREAT","HWY-3"]
+  },
+  {
+    tMin: 90, tLabel: "T+01:30",
+    title: "AUDIT-BEAR-2026-001",
+    detail: "Regulator packet: 2 recs (1 superseded), 3 approvals, 8 executions, 0 asset loss, 140 customers out for 23 min.",
+    fireDetect: [],
+    wind: { "EW-RIDGE-N":310, "EW-VALLEY-W":308, "EW-RIDGE-S":312, "EW-TOWN-E":306, "EW-SUB-A":309 },
+    cone: { bearing: 160, halfAngle: 22, length: 320, label: "RZ-002 · SSE" },
+    risk: []
+  }
+];
+
+const FIRE_X = 359, FIRE_Y = 176;
+let currentStep = 0;
+let playing = false;
+let playTimer = null;
+let speed = 1;
+const SPEEDS = [1, 2, 4];
+
+const $ = sel => document.querySelector(sel);
+const $$ = sel => document.querySelectorAll(sel);
+
+/* ----- Build timeline marks ----- */
+function buildTimeline() {
+  const tl = $("#timeline");
+  const minMin = 0, maxMin = STEPS[STEPS.length-1].tMin;
+  STEPS.forEach((step, i) => {
+    const pct = (step.tMin - minMin) / (maxMin - minMin) * 100;
+    const mark = document.createElement("div");
+    mark.className = "timeline-mark" + (step.isShift ? " shift" : "");
+    mark.style.left = pct + "%";
+    mark.title = step.tLabel + " · " + step.title;
+    mark.addEventListener("click", () => gotoStep(i));
+    const label = document.createElement("div");
+    label.className = "timeline-label" + (step.isShift ? " shift" : "");
+    label.textContent = step.isShift ? "WIND SHIFT" : step.tLabel;
+    label.style.left = pct + "%";
+    tl.appendChild(label);
+    tl.appendChild(mark);
+  });
+}
+
+function setProgress() {
+  const maxMin = STEPS[STEPS.length-1].tMin;
+  const pct = STEPS[currentStep].tMin / maxMin * 100;
+  $("#timelineProgress").style.width = pct + "%";
+  $$(".timeline-mark").forEach((m, i) => {
+    m.classList.toggle("passed", i <= currentStep);
+    m.classList.toggle("current", i === currentStep);
+  });
+}
+
+/* ----- Wind arrows ----- */
+function setWind(windMap) {
+  $$("[data-wind]").forEach(line => {
+    const cube = line.getAttribute("data-wind");
+    const dirFrom = windMap && windMap[cube];
+    // Wind direction is "from" - the arrow points TO where the wind goes
+    // Compass bearing 240 means wind FROM 240°, so it blows toward 60°
+    // In SVG (y down), heading bearing b means dx=sin(b°), dy=-cos(b°)
+    const blowTo = (dirFrom == null) ? null : (dirFrom + 180) % 360;
+    if (blowTo == null) {
+      line.style.opacity = 0;
+      return;
+    }
+    line.style.opacity = .9;
+    // The line is drawn along +x at length 28. Rotate it so it points to bearing blowTo.
+    // Bearing 0 = north (up). Rotation from +x axis: rotateAngle = blowTo - 90.
+    const rot = blowTo - 90;
+    line.setAttribute("transform", `rotate(${rot})`);
+  });
+}
+
+/* ----- Spread cone ----- */
+function setCone(cone) {
+  const conePath = $("#conePath");
+  const coneG = $("#cone");
+  if (!cone) {
+    conePath.classList.remove("show");
+    return;
+  }
+  const halfRad = cone.halfAngle * Math.PI / 180;
+  const r = cone.length;
+  // Build wedge in LOCAL frame: tip at origin, opening along +x
+  const x1 = Math.cos(halfRad) * r,  y1 = -Math.sin(halfRad) * r;
+  const x2 = Math.cos(halfRad) * r,  y2 =  Math.sin(halfRad) * r;
+  // Path with arc from (x1,y1) to (x2,y2)
+  // Use arc with rx=ry=r
+  const d = `M 0 0 L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
+  conePath.setAttribute("d", d);
+  // Position + rotate the group. Bearing -> rotation from +x axis = bearing - 90.
+  const rot = cone.bearing - 90;
+  coneG.setAttribute("transform", `translate(${FIRE_X} ${FIRE_Y}) rotate(${rot})`);
+  // Slight delay so transition triggers
+  requestAnimationFrame(() => conePath.classList.add("show"));
+}
+
+/* ---- EdgeWorks unit info ---- */
+const EW_INFO = {
+  "EW-RIDGE-N": {
+    fullName: "EdgeWorks — Ridge North",
+    lat: 49.621, lng: -114.512, elevation: "1 847 m",
+    role: "Primary fire perimeter sentinel · north ridge",
+    interfaces: ["sigInt","aiInt","opsInt","finInt"]
+  },
+  "EW-VALLEY-W": {
+    fullName: "EdgeWorks — Valley West",
+    lat: 49.600, lng: -114.530, elevation: "1 432 m",
+    role: "Valley floor smoke and particulate monitor",
+    interfaces: ["sigInt","aiInt","opsInt","finInt"]
+  },
+  "EW-RIDGE-S": {
+    fullName: "EdgeWorks — Ridge South",
+    lat: 49.579, lng: -114.489, elevation: "1 924 m",
+    role: "South flank perimeter and stabilisation monitor",
+    interfaces: ["sigInt","aiInt","opsInt","finInt"]
+  },
+  "EW-TOWN-E": {
+    fullName: "EdgeWorks — Town East",
+    lat: 49.607, lng: -114.480, elevation: "1 298 m",
+    role: "Town perimeter air quality and wind monitor",
+    interfaces: ["sigInt","aiInt","opsInt","finInt"]
+  },
+  "EW-SUB-A": {
+    fullName: "EdgeWorks — Substation Alpha",
+    lat: 49.592, lng: -114.475, elevation: "1 356 m",
+    role: "Substation area infrastructure and air quality monitor",
+    interfaces: ["sigInt","aiInt","opsInt","finInt"]
+  }
+};
+
+/*
+ * Per-step sensor readings for each EdgeWorks unit.
+ * Indices 0-9 match STEPS array.
+ * Each entry: { thermal, pm25, temp, rh, detections[] }
+ */
+const EW_STEP_DATA = {
+  "EW-RIDGE-N": [
+    { thermal:312, pm25:45,  temp:28, rh:22, detections:["fire · fire_detector_v3 (conf 0.94)"] },
+    { thermal:340, pm25:65,  temp:29, rh:20, detections:["fire · fire_detector_v3 (conf 0.97)"] },
+    { thermal:382, pm25:82,  temp:30, rh:18, detections:["fire · fire_detector_v3 (conf 0.97)"] },
+    { thermal:420, pm25:115, temp:31, rh:16, detections:["fire · fire_detector_v3 (conf 0.98)"] },
+    { thermal:458, pm25:138, temp:33, rh:13, detections:["fire (conf 0.98)","wind_shift · spread_estimator_v1 (conf 0.92)"] },
+    { thermal:471, pm25:118, temp:31, rh:15, detections:["fire · fire_detector_v3 (conf 0.99)"] },
+    { thermal:478, pm25:110, temp:30, rh:15, detections:["fire · fire_detector_v3 (conf 0.99)"] },
+    { thermal:480, pm25:105, temp:29, rh:16, detections:["fire · fire_detector_v3 (conf 0.99)"] },
+    { thermal:345, pm25:58,  temp:25, rh:22, detections:["spread_stabilized · spread_estimator_v1 (conf 0.81)"] },
+    { thermal:185, pm25:24,  temp:22, rh:30, detections:[] }
+  ],
+  "EW-VALLEY-W": [
+    { thermal:85,  pm25:22,  temp:26, rh:28, detections:[] },
+    { thermal:92,  pm25:95,  temp:27, rh:25, detections:["smoke · smoke_classifier_v2 (conf 0.88)"] },
+    { thermal:104, pm25:110, temp:28, rh:22, detections:["smoke · smoke_classifier_v2 (conf 0.91)"] },
+    { thermal:120, pm25:132, temp:29, rh:20, detections:["smoke (conf 0.93)"] },
+    { thermal:145, pm25:155, temp:31, rh:17, detections:["smoke (conf 0.94)"] },
+    { thermal:138, pm25:128, temp:29, rh:19, detections:["smoke (conf 0.91)"] },
+    { thermal:130, pm25:118, temp:28, rh:20, detections:["smoke (conf 0.88)"] },
+    { thermal:125, pm25:108, temp:27, rh:21, detections:["smoke (conf 0.85)"] },
+    { thermal:95,  pm25:68,  temp:24, rh:26, detections:[] },
+    { thermal:48,  pm25:18,  temp:21, rh:32, detections:[] }
+  ],
+  "EW-RIDGE-S": [
+    { thermal:42,  pm25:12,  temp:24, rh:32, detections:[] },
+    { thermal:45,  pm25:18,  temp:24, rh:31, detections:[] },
+    { thermal:52,  pm25:28,  temp:25, rh:30, detections:[] },
+    { thermal:62,  pm25:38,  temp:26, rh:28, detections:[] },
+    { thermal:78,  pm25:52,  temp:28, rh:24, detections:[] },
+    { thermal:195, pm25:145, temp:32, rh:18, detections:["smoke · smoke_classifier_v2 (conf 0.89)"] },
+    { thermal:258, pm25:175, temp:33, rh:16, detections:["smoke (conf 0.93)"] },
+    { thermal:312, pm25:195, temp:34, rh:15, detections:["smoke (conf 0.95)","fire · fire_detector_v3 (conf 0.71)"] },
+    { thermal:285, pm25:148, temp:30, rh:18, detections:["spread_stabilized · spread_estimator_v1 (conf 0.81)"] },
+    { thermal:125, pm25:38,  temp:23, rh:28, detections:[] }
+  ],
+  "EW-TOWN-E": [
+    { thermal:38,  pm25:8,   temp:22, rh:35, detections:[] },
+    { thermal:40,  pm25:14,  temp:23, rh:33, detections:[] },
+    { thermal:45,  pm25:22,  temp:24, rh:32, detections:[] },
+    { thermal:52,  pm25:35,  temp:25, rh:30, detections:[] },
+    { thermal:65,  pm25:48,  temp:27, rh:26, detections:[] },
+    { thermal:72,  pm25:88,  temp:29, rh:22, detections:["smoke · smoke_classifier_v2 (conf 0.75)"] },
+    { thermal:78,  pm25:95,  temp:29, rh:22, detections:["smoke (conf 0.78)"] },
+    { thermal:82,  pm25:98,  temp:29, rh:21, detections:["smoke (conf 0.80)"] },
+    { thermal:65,  pm25:62,  temp:26, rh:25, detections:[] },
+    { thermal:32,  pm25:12,  temp:20, rh:34, detections:[] }
+  ],
+  "EW-SUB-A": [
+    { thermal:35,  pm25:6,   temp:22, rh:35, detections:[] },
+    { thermal:38,  pm25:10,  temp:22, rh:34, detections:[] },
+    { thermal:42,  pm25:18,  temp:23, rh:32, detections:[] },
+    { thermal:50,  pm25:28,  temp:24, rh:30, detections:[] },
+    { thermal:62,  pm25:42,  temp:26, rh:27, detections:[] },
+    { thermal:145, pm25:118, temp:31, rh:19, detections:["smoke · smoke_classifier_v2 (conf 0.82)"] },
+    { thermal:178, pm25:142, temp:32, rh:18, detections:["smoke (conf 0.86)"] },
+    { thermal:210, pm25:158, temp:33, rh:16, detections:["smoke (conf 0.88)"] },
+    { thermal:165, pm25:95,  temp:28, rh:21, detections:[] },
+    { thermal:52,  pm25:15,  temp:20, rh:33, detections:[] }
+  ]
+};
+
+/* ---- Support assets ---- */
+const SUPPORT_ASSETS = [
+  { id:"FIRE-HALL-W",    name:"Fire Hall — West",      type:"FireStation",   icon:"🚒" },
+  { id:"REC-CTR-N",      name:"Reception Ctr — North", type:"EvacReception", icon:"⛺" },
+  { id:"HELIPAD-1",      name:"Helipad Alpha",          type:"Helipad",       icon:"H" },
+  { id:"TANKER-FILL-1",  name:"Tanker Fill — Valley",   type:"TankerFill",    icon:"💧" },
+  { id:"FIRE-HALL-S",    name:"Fire Hall — South",      type:"FireStation",   icon:"🚒" },
+  { id:"REC-CTR-W",      name:"Reception Ctr — West",   type:"EvacReception", icon:"⛺" },
+  { id:"HELIPAD-2",      name:"Helipad Beta",            type:"Helipad",       icon:"H" },
+  { id:"FUEL-CACHE-S",   name:"Fuel Cache South",        type:"FuelDepot",     icon:"⛽" }
+];
+
+/* Static details for each support asset (shown in the inspector) */
+const SUPPORT_INFO = {
+  "FIRE-HALL-W": {
+    fullName: "Fire Hall — West",
+    type: "FireStation", lat: 49.606, lng: -114.540,
+    resources: [["Apparatus","1× pumper · 1× tanker"],["Crew","6 firefighters"],["Response zone","NE corridor"]],
+    notes: "Primary west-side hall. First-response pumper crew for NE flank. Redeployed south on wind shift."
+  },
+  "REC-CTR-N": {
+    fullName: "Reception Centre — North",
+    type: "EvacReception", lat: 49.636, lng: -114.446,
+    resources: [["Capacity","450 evacuees"],["Amenities","Meals · cots · registration"],["Operator","Municipal Emergency Services"]],
+    notes: "Registered with AHS and Red Cross. Primary reception for east-sector residents during NE spread."
+  },
+  "HELIPAD-1": {
+    fullName: "Helipad Alpha",
+    type: "Helipad", lat: 49.602, lng: -114.521,
+    resources: [["Pad class","Class B"],["Aircraft","1× air tanker"],["Fuel","Avgas on-site"]],
+    notes: "Primary air-ops pad for NE flank. Repositioned SSE after wind shift; HELIPAD-2 takes over coordination."
+  },
+  "TANKER-FILL-1": {
+    fullName: "Tanker Fill — Valley",
+    type: "TankerFill", lat: 49.632, lng: -114.441,
+    resources: [["Flow rate","1 200 L/min"],["Source","Bear Creek reservoir"],["Access","All-season gravel road"]],
+    notes: "Gravity-fed tanker resupply in the valley. Continues NE resupply through wind shift; SSE crews use FUEL-CACHE-S."
+  },
+  "FIRE-HALL-S": {
+    fullName: "Fire Hall — South",
+    type: "FireStation", lat: 49.574, lng: -114.489,
+    resources: [["Apparatus","1× pumper · 1× brush truck"],["Crew","4 firefighters"],["Response zone","SSE corridor"]],
+    notes: "South district hall. Remains on alert for NE phase; activates as primary SSE response after wind shift."
+  },
+  "REC-CTR-W": {
+    fullName: "Reception Centre — West",
+    type: "EvacReception", lat: 49.600, lng: -114.549,
+    resources: [["Capacity","200 evacuees"],["Amenities","Meals · cots · registration"],["Operator","Municipal Emergency Services"]],
+    notes: "West-side reception centre. Activated for South Hamlet evacuation under SSE spread."
+  },
+  "HELIPAD-2": {
+    fullName: "Helipad Beta",
+    type: "Helipad", lat: 49.589, lng: -114.519,
+    resources: [["Pad class","Class B"],["Aircraft","1× air tanker"],["Fuel","Avgas on-site"]],
+    notes: "Secondary air-ops pad. Assumes air-tanker coordination for SSE flank after HELIPAD-1 repositions."
+  },
+  "FUEL-CACHE-S": {
+    fullName: "Fuel Cache South",
+    type: "FuelDepot", lat: 49.582, lng: -114.481,
+    resources: [["Fuel types","Diesel · gasoline"],["Capacity","2 000 L"],["Access","Gravel road · locked gate"]],
+    notes: "Forward fuel cache pre-positioned for SSE operations. Supports relocated ground crews after wind shift."
+  }
+};
+
+/* State and role text per timeline step. States: active | redeploying | standby */
+const SUPPORT_STEPS = [
+  /* 0 T+00 Ignition */
+  { "FIRE-HALL-W":{ state:"standby",     role:"On alert" },
+    "REC-CTR-N":  { state:"standby",     role:"On alert" },
+    "HELIPAD-1":  { state:"standby",     role:"On alert" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Pre-positioned" },
+    "FIRE-HALL-S":{ state:"standby",     role:"On alert" },
+    "REC-CTR-W":  { state:"standby",     role:"On alert" },
+    "HELIPAD-2":  { state:"standby",     role:"On alert" },
+    "FUEL-CACHE-S":{ state:"standby",    role:"Pre-positioned" } },
+  /* 1 T+03 Smoke */
+  { "FIRE-HALL-W":{ state:"active",      role:"Pumper en route · NE flank" },
+    "REC-CTR-N":  { state:"standby",     role:"On alert" },
+    "HELIPAD-1":  { state:"active",      role:"Air tanker scrambled · NE" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Pre-positioned" },
+    "FIRE-HALL-S":{ state:"standby",     role:"On alert" },
+    "REC-CTR-W":  { state:"standby",     role:"On alert" },
+    "HELIPAD-2":  { state:"standby",     role:"On alert" },
+    "FUEL-CACHE-S":{ state:"standby",    role:"Pre-positioned" } },
+  /* 2 T+05 NE cone */
+  { "FIRE-HALL-W":{ state:"active",      role:"Pumper crew · NE flank standby" },
+    "REC-CTR-N":  { state:"active",      role:"Evacuee reception · east sector" },
+    "HELIPAD-1":  { state:"active",      role:"Air tanker coordination · NE" },
+    "TANKER-FILL-1":{ state:"active",    role:"Water resupply · NE crews" },
+    "FIRE-HALL-S":{ state:"standby",     role:"On alert" },
+    "REC-CTR-W":  { state:"standby",     role:"On alert" },
+    "HELIPAD-2":  { state:"standby",     role:"On alert" },
+    "FUEL-CACHE-S":{ state:"standby",    role:"Pre-positioned" } },
+  /* 3 T+12 REC-001 approved */
+  { "FIRE-HALL-W":{ state:"active",      role:"Pumper crew · NE flank" },
+    "REC-CTR-N":  { state:"active",      role:"Evacuee reception · east sector" },
+    "HELIPAD-1":  { state:"active",      role:"Air tanker coordination · NE" },
+    "TANKER-FILL-1":{ state:"active",    role:"Water resupply · NE crews" },
+    "FIRE-HALL-S":{ state:"standby",     role:"On alert" },
+    "REC-CTR-W":  { state:"standby",     role:"On alert" },
+    "HELIPAD-2":  { state:"standby",     role:"On alert" },
+    "FUEL-CACHE-S":{ state:"standby",    role:"Pre-positioned" } },
+  /* 4 T+28 Wind shift */
+  { "FIRE-HALL-W":{ state:"redeploying", role:"Redeploying → SSE coverage" },
+    "REC-CTR-N":  { state:"active",      role:"Still receiving east evacuees" },
+    "HELIPAD-1":  { state:"redeploying", role:"Repositioning for SSE flank" },
+    "TANKER-FILL-1":{ state:"active",    role:"Continuing NE resupply" },
+    "FIRE-HALL-S":{ state:"active",      role:"Activating · SSE flank" },
+    "REC-CTR-W":  { state:"standby",     role:"Preparing for South Hamlet evac" },
+    "HELIPAD-2":  { state:"active",      role:"Taking over air coordination" },
+    "FUEL-CACHE-S":{ state:"standby",    role:"Pre-positioning for crew relocation" } },
+  /* 5 T+30 SSE cone */
+  { "FIRE-HALL-W":{ state:"standby",     role:"Stood down · NE risk cleared" },
+    "REC-CTR-N":  { state:"standby",     role:"Stood down · east risk cleared" },
+    "HELIPAD-1":  { state:"standby",     role:"Stood down · repositioned" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Stood down" },
+    "FIRE-HALL-S":{ state:"active",      role:"Pumper crew · SSE flank" },
+    "REC-CTR-W":  { state:"active",      role:"Evacuee reception · south hamlet" },
+    "HELIPAD-2":  { state:"active",      role:"Air tanker coordination · SSE" },
+    "FUEL-CACHE-S":{ state:"active",     role:"Forward fuel · relocated crew" } },
+  /* 6 T+32 REC-002 */
+  { "FIRE-HALL-W":{ state:"standby",     role:"Reserve · standby" },
+    "REC-CTR-N":  { state:"standby",     role:"Reserve · standby" },
+    "HELIPAD-1":  { state:"standby",     role:"Reserve · standby" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Reserve · standby" },
+    "FIRE-HALL-S":{ state:"active",      role:"Pumper crew · SSE flank" },
+    "REC-CTR-W":  { state:"active",      role:"Evacuee reception · south hamlet" },
+    "HELIPAD-2":  { state:"active",      role:"Air tanker coordination · SSE" },
+    "FUEL-CACHE-S":{ state:"active",     role:"Forward fuel · relocated crew" } },
+  /* 7 T+35 Approvals */
+  { "FIRE-HALL-W":{ state:"standby",     role:"Reserve · standby" },
+    "REC-CTR-N":  { state:"standby",     role:"Reserve · standby" },
+    "HELIPAD-1":  { state:"standby",     role:"Reserve · standby" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Reserve · standby" },
+    "FIRE-HALL-S":{ state:"active",      role:"Pumper crew · SSE flank" },
+    "REC-CTR-W":  { state:"active",      role:"Evacuee reception · south hamlet" },
+    "HELIPAD-2":  { state:"active",      role:"Air tanker coordination · SSE" },
+    "FUEL-CACHE-S":{ state:"active",     role:"Forward fuel · relocated crew" } },
+  /* 8 T+55 Stabilization */
+  { "FIRE-HALL-W":{ state:"standby",     role:"Reserve · standby" },
+    "REC-CTR-N":  { state:"standby",     role:"Reserve · standby" },
+    "HELIPAD-1":  { state:"standby",     role:"Reserve · standby" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Reserve · standby" },
+    "FIRE-HALL-S":{ state:"active",      role:"Pumper crew · SSE flank" },
+    "REC-CTR-W":  { state:"active",      role:"Evacuee reception · south hamlet" },
+    "HELIPAD-2":  { state:"active",      role:"Air tanker coordination · SSE" },
+    "FUEL-CACHE-S":{ state:"active",     role:"Forward fuel · relocated crew" } },
+  /* 9 T+90 Audit */
+  { "FIRE-HALL-W":{ state:"standby",     role:"Demobilised" },
+    "REC-CTR-N":  { state:"standby",     role:"Demobilised" },
+    "HELIPAD-1":  { state:"standby",     role:"Demobilised" },
+    "TANKER-FILL-1":{ state:"standby",   role:"Demobilised" },
+    "FIRE-HALL-S":{ state:"standby",     role:"Demobilised" },
+    "REC-CTR-W":  { state:"standby",     role:"Demobilised" },
+    "HELIPAD-2":  { state:"standby",     role:"Demobilised" },
+    "FUEL-CACHE-S":{ state:"standby",    role:"Demobilised" } }
+];
+
+/* ----- Assets ----- */
+const ASSET_IDS = ["TOWN-BEAR","SUB-BEAR-1","LINE-NE-7","GAS-REG-3","HWY-11-N","HWY-11-S","STAGE-1","COMMS-TOWER-2","BEAR-HOSPITAL","BEAR-SCHOOL","SOUTH-HAMLET","HWY-3","WATER-TREAT"];
+const ASSET_SUB = {
+  "TOWN-BEAR":"Community · pop 612",
+  "SUB-BEAR-1":"Substation · 138/25 kV",
+  "LINE-NE-7":"Line · 138 kV",
+  "GAS-REG-3":"Gas reg · high-pressure",
+  "HWY-11-N":"Highway · evac N",
+  "HWY-11-S":"Highway · evac S",
+  "STAGE-1":"Crew staging",
+  "COMMS-TOWER-2":"Repeater tower",
+  "BEAR-HOSPITAL":"Health centre · critical care",
+  "BEAR-SCHOOL":"K-12 school · 380 students",
+  "SOUTH-HAMLET":"Community · pop 140",
+  "HWY-3":"Crowsnest Hwy · E-W artery",
+  "WATER-TREAT":"Water treatment · municipal"
+};
+
+/* Full asset info (mirrors load.cypher). Used by the click-driven inspector. */
+const ASSET_INFO = {
+  "TOWN-BEAR": {
+    name: "Town of Bear Creek", subtype: "Community", operator: "Municipal",
+    lat: 49.6040, lng: -114.4830,
+    props: [["Population","612"],["Sensitivity","high"],["Protection priority","1"]],
+    notes: "Primary protected entity. Evacuation orders routed via municipal alerting."
+  },
+  "SUB-BEAR-1": {
+    name: "Bear Creek 138/25 kV Substation", subtype: "Substation", operator: "ATCO",
+    lat: 49.5985, lng: -114.4755,
+    props: [["Voltage","138/25 kV"],["Sensitivity","high"],["Protection priority","2"]],
+    notes: "Feeds town + valley. Breaker open available via ATCO SCADA envelope."
+  },
+  "LINE-NE-7": {
+    name: "138 kV Line NE-7", subtype: "TransmissionLine", operator: "ATCO",
+    lat: 49.6005, lng: -114.4875,
+    props: [["Voltage","138 kV"],["Endpoints","NW ridge → SE valley"],["Sensitivity","medium"]],
+    notes: "Crosses the valley. De-energize available via ATCO SCADA."
+  },
+  "GAS-REG-3": {
+    name: "Gas Regulating Station 3", subtype: "GasFacility", operator: "ATCO",
+    lat: 49.5950, lng: -114.4810,
+    props: [["Pressure","high"],["Sensitivity","critical"],["Protection priority","1"]],
+    notes: "Critical hazard. Upstream block valve closeable via gas SCADA on REGCOND envelope."
+  },
+  "HWY-11-N": {
+    name: "Highway 11 — north segment", subtype: "Highway", operator: "Province",
+    lat: 49.6220, lng: -114.4815,
+    props: [["Role","primary evacuation north"],["Sensitivity","medium"]],
+    notes: "Default evacuation route under NE spread; closed at km 4 under SSE spread."
+  },
+  "HWY-11-S": {
+    name: "Highway 11 — south segment", subtype: "Highway", operator: "Province",
+    lat: 49.5845, lng: -114.4840,
+    props: [["Role","alternate evacuation south"],["Sensitivity","medium"]],
+    notes: "Becomes primary evac route after wind shift to SSE."
+  },
+  "STAGE-1": {
+    name: "Firefighter Staging — West", subtype: "StagingArea", operator: "AB Wildfire",
+    lat: 49.6020, lng: -114.5180,
+    props: [["Crew count","24"],["Sensitivity","medium"]],
+    notes: "Initial staging upwind of NE spread. Becomes upwind-adjacent under SSE → must relocate."
+  },
+  "COMMS-TOWER-2": {
+    name: "Repeater Tower 2", subtype: "CommsAsset", operator: "Provincial Comms",
+    lat: 49.5870, lng: -114.4900,
+    props: [["Serves units","EW-RIDGE-S"],["Sensitivity","high"]],
+    notes: "Loss of this tower would disconnect EW-RIDGE-S uplink."
+  },
+  "BEAR-HOSPITAL": {
+    name: "Bear Creek Health Centre", subtype: "Hospital", operator: "Alberta Health Services",
+    lat: 49.629, lng: -114.476,
+    props: [["Beds","28"],["Emergency dept","yes"],["Sensitivity","critical"],["Protection priority","1"]],
+    notes: "Critical care and emergency services for Bear Creek Valley. Priority evacuation when inside spread cone."
+  },
+  "BEAR-SCHOOL": {
+    name: "Bear Creek K-12 School", subtype: "School", operator: "Crowsnest Pass School District",
+    lat: 49.625, lng: -114.491,
+    props: [["Students","380"],["Staff","42"],["Sensitivity","high"],["Protection priority","1"]],
+    notes: "School-age population requiring structured evacuation. Lockdown or evacuation triggered when within spread cone."
+  },
+  "SOUTH-HAMLET": {
+    name: "South Valley Hamlet", subtype: "Community", operator: "Municipal",
+    lat: 49.594, lng: -114.492,
+    props: [["Population","140"],["Sensitivity","high"],["Protection priority","2"]],
+    notes: "Residential community south of the main valley. Directly in SSE spread cone after wind shift."
+  },
+  "HWY-3": {
+    name: "Crowsnest Highway 3", subtype: "Highway", operator: "Alberta Transportation",
+    lat: 49.610, lng: -114.500,
+    props: [["Role","primary E-W artery"],["Daily traffic","~3 200 vehicles"],["Sensitivity","medium"]],
+    notes: "Main east-west highway through the Crowsnest Pass. Closure affects all cross-valley evacuation routing."
+  },
+  "WATER-TREAT": {
+    name: "Bear Creek Water Works", subtype: "Utility", operator: "Bear Creek Municipal Services",
+    lat: 49.601, lng: -114.506,
+    props: [["Capacity","2 400 m³/day"],["Serves","Bear Creek + South Hamlet"],["Sensitivity","high"]],
+    notes: "Municipal water treatment. Wildfire ember transport creates contamination risk; intake shutdown protocol available."
+  }
+};
+
+/* Actions per asset, keyed by the recommendation that targets them */
+const ASSET_ACTIONS = {
+  "TOWN-BEAR":     [{ rec:"REC-FIRE-001", ex:"EX-FIRE-001-A", action:"evacuation_order east sector", channel:"municipal_alerting" }],
+  "LINE-NE-7":     [
+    { rec:"REC-FIRE-001", ex:"EX-FIRE-001-C", action:"atco_standby",  channel:"atco_scada" },
+    { rec:"REC-FIRE-002", ex:"EX-FIRE-002-A", action:"deenergize",    channel:"atco_scada (envelope)" }
+  ],
+  "STAGE-1":       [
+    { rec:"REC-FIRE-001", ex:"EX-FIRE-001-B", action:"crew prep NE flank", channel:"fire_dispatch" },
+    { rec:"REC-FIRE-002", ex:"EX-FIRE-002-D", action:"crew relocate west of HWY-11", channel:"fire_dispatch" }
+  ],
+  "GAS-REG-3":     [{ rec:"REC-FIRE-002", ex:"EX-FIRE-002-B", action:"isolate_valve",  channel:"gas_scada (envelope)" }],
+  "SUB-BEAR-1":    [{ rec:"REC-FIRE-002", ex:"EX-FIRE-002-C", action:"open_breaker south_feeder", channel:"atco_scada (envelope)" }],
+  "HWY-11-S":      [{ rec:"REC-FIRE-002", ex:"EX-FIRE-002-E", action:"evac_reroute", channel:"municipal_alerting" }],
+  "HWY-11-N":      [],
+  "COMMS-TOWER-2": [],
+  "BEAR-HOSPITAL": [{ rec:"REC-FIRE-001", ex:"EX-FIRE-001-D", action:"evacuation_order health_centre", channel:"municipal_alerting" }],
+  "BEAR-SCHOOL":   [{ rec:"REC-FIRE-001", ex:"EX-FIRE-001-E", action:"evacuation_order school", channel:"municipal_alerting" }],
+  "SOUTH-HAMLET":  [{ rec:"REC-FIRE-002", ex:"EX-FIRE-002-F", action:"evacuation_order south_hamlet", channel:"municipal_alerting" }],
+  "HWY-3":         [],
+  "WATER-TREAT":   [{ rec:"REC-FIRE-002", ex:"EX-FIRE-002-G", action:"intake_shutdown", channel:"municipal_services" }]
+};
+
+/* Risk reasons by zone (mirrors load.cypher) */
+const RISK_DETAIL = {
+  "RZ-001": {
+    "TOWN-BEAR":  { score:0.78, reason:"within NE spread cone, pre-shift" },
+    "LINE-NE-7":  { score:0.71, reason:"line crosses NE spread cone" },
+    "HWY-11-N":   { score:0.65, reason:"north segment within cone" },
+    "BEAR-HOSPITAL": { score: 0.85, reason: "health centre in NE spread cone; critical evacuation priority" },
+    "BEAR-SCHOOL":   { score: 0.77, reason: "school within NE spread cone; 380 students at risk" },
+    "HWY-3":         { score: 0.60, reason: "eastern valley approach in NE spread corridor" }
+  },
+  "RZ-002": {
+    "SUB-BEAR-1":     { score:0.82, reason:"substation directly in SSE spread cone" },
+    "GAS-REG-3":      { score:0.89, reason:"critical gas asset in SSE cone" },
+    "HWY-11-S":       { score:0.58, reason:"south evac segment edge of cone" },
+    "COMMS-TOWER-2":  { score:0.74, reason:"tower south of fire, in cone" },
+    "STAGE-1":        { score:0.66, reason:"staging area now upwind-adjacent to spread" },
+    "SOUTH-HAMLET":  { score: 0.74, reason: "community directly in SSE spread cone post-shift" },
+    "WATER-TREAT":   { score: 0.68, reason: "water intake threatened by SSE spread and ember transport" },
+    "HWY-3":         { score: 0.55, reason: "western valley approach affected by SSE spread" }
+  }
+};
+
+function setRisk(riskList) {
+  ASSET_IDS.forEach(id => {
+    const onMap = $(`#asset-${id}`);
+    const inPanel = $(`#panel-${id}`);
+    const at = riskList.includes(id);
+    if (onMap) onMap.classList.toggle("risk", at);
+    if (inPanel) inPanel.classList.toggle("risk", at);
+  });
+}
+
+function buildSupport() {
+  const list = $("#supportList");
+  SUPPORT_ASSETS.forEach(sa => {
+    const card = document.createElement("div");
+    card.id = "sup-card-" + sa.id;
+    card.className = "sup-card standby";
+    card.style.cursor = "pointer";
+    card.innerHTML = `<div class="sup-dot"></div><div><div class="sup-name">${sa.id}</div><div class="sup-role" id="sup-role-${sa.id}">On alert</div></div>`;
+    card.addEventListener("click", () => {
+      if (currentSupportUnit === sa.id) { closeInspector(); return; }
+      openSupportInspector(sa.id, { source: "panel" });
+    });
+    list.appendChild(card);
+  });
+}
+
+function setSupport(stepIndex) {
+  const states = SUPPORT_STEPS[stepIndex];
+  if (!states) return;
+  SUPPORT_ASSETS.forEach(sa => {
+    const { state, role } = states[sa.id] || { state:"standby", role:"" };
+    // Update panel card
+    const card = $(`#sup-card-${sa.id}`);
+    if (card) {
+      card.className = "sup-card " + state;
+      const roleEl = $(`#sup-role-${sa.id}`);
+      if (roleEl) roleEl.textContent = role;
+    }
+    // Update map marker
+    const marker = $(`#sup-${sa.id}`);
+    if (marker) {
+      marker.classList.remove("active","redeploying","standby");
+      marker.classList.add(state);
+    }
+  });
+}
+
+function buildAssets() {
+  const grid = $("#assetGrid");
+  ASSET_IDS.forEach(id => {
+    const div = document.createElement("div");
+    div.id = "panel-" + id;
+    div.className = "asset click";
+    div.innerHTML = `<div class="a-name">${id}</div><div class="a-sub">${ASSET_SUB[id]}</div>`;
+    div.addEventListener("click", () => openInspector(id, { source:"panel" }));
+    grid.appendChild(div);
+  });
+}
+
+/* ----- Inspector (click-driven asset popup) ----- */
+let currentInspected = null;
+
+function findCurrentRisk(assetId) {
+  // The currently-relevant zone is the one in the current step's risk list.
+  const step = STEPS[currentStep];
+  if (!step.risk.includes(assetId)) return null;
+  const zoneId = step.cone && step.cone.label && step.cone.label.startsWith("RZ-001") ? "RZ-001" : "RZ-002";
+  // Use whichever zone has this asset.
+  for (const z of ["RZ-001","RZ-002"]) {
+    if (RISK_DETAIL[z] && RISK_DETAIL[z][assetId] && step.risk.includes(assetId)) {
+      return { zoneId: z, ...RISK_DETAIL[z][assetId] };
+    }
+  }
+  return null;
+}
+
+function renderInspector(assetId) {
+  const info = ASSET_INFO[assetId];
+  if (!info) return;
+  const insName = $("#insName");
+  const insBody = $("#insBody");
+  const ins = $("#inspector");
+  const step = STEPS[currentStep];
+  const risk = findCurrentRisk(assetId);
+
+  ins.classList.toggle("risk", !!risk);
+  insName.textContent = assetId;
+
+  const propsRows = info.props.map(p =>
+    `<div class="ins-row"><span class="k">${p[0]}</span><span class="v">${p[1]}</span></div>`
+  ).join("");
+
+  const headerRows = `
+    <div class="ins-row"><span class="k">Name</span><span class="v">${info.name}</span></div>
+    <div class="ins-row"><span class="k">Type</span><span class="v">${info.subtype}</span></div>
+    <div class="ins-row"><span class="k">Operator</span><span class="v">${info.operator}</span></div>
+    <div class="ins-row"><span class="k">Location</span><span class="v">${info.lat.toFixed(4)}, ${info.lng.toFixed(4)}</span></div>
+  `;
+
+  const riskBlock = risk ? `
+    <div class="ins-risk">
+      <div class="label">⚠ At risk · ${risk.zoneId} · score ${risk.score.toFixed(2)}</div>
+      <div class="reason">${risk.reason}</div>
+      <div class="meta">derived from spread estimate at T+${step.tMin.toString().padStart(2,"0")}:00 · fire FIRE-BEAR-001</div>
+    </div>
+  ` : `
+    <div class="ins-safe">● Not currently in any active risk zone</div>
+  `;
+
+  const acts = ASSET_ACTIONS[assetId] || [];
+  const actsBlock = acts.length ? `
+    <div class="ins-actions">
+      <div class="lbl">Actions targeting this asset</div>
+      ${acts.map(a => `
+        <div class="item"><span class="tag">${a.ex}</span>${a.action} <span style="color:var(--ink-3)">· ${a.channel}</span></div>
+      `).join("")}
+    </div>
+  ` : "";
+
+  const notes = info.notes ? `
+    <div class="ins-actions">
+      <div class="lbl">Notes</div>
+      <div class="item" style="white-space:normal;color:var(--ink-2);line-height:1.5;">${info.notes}</div>
+    </div>
+  ` : "";
+
+  insBody.innerHTML = headerRows + propsRows + riskBlock + actsBlock + notes;
+}
+
+function positionInspector(assetId) {
+  const ins = $("#inspector");
+  const map = $("#mapWrap");
+  const mapRect = map.getBoundingClientRect();
+  // Find the asset shape's bbox on screen
+  const el = $(`#asset-${assetId} .a-shape`) || $(`#asset-${assetId}`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  let x = r.left + r.width/2 - mapRect.left;
+  let y = r.top  - mapRect.top;
+  // Clamp inside map area (inspector min-width 280, so keep at least 150 from edges)
+  const pad = 160;
+  x = Math.max(pad, Math.min(mapRect.width - pad, x));
+  const insH = ins.offsetHeight || 320;
+  if (y < insH + 20) {
+    // Flip below if inspector would clip the top
+    ins.style.transform = "translate(-50%, 24px)";
+    y = r.bottom - mapRect.top;
+  } else {
+    ins.style.transform = "translate(-50%, calc(-100% - 16px))";
+  }
+  ins.style.left = x + "px";
+  ins.style.top  = y + "px";
+}
+
+function openInspector(assetId, opts = {}) {
+  currentInspected = assetId;
+  renderInspector(assetId);
+  positionInspector(assetId);
+  $("#inspector").classList.add("show");
+  // Highlight selection
+  $$(".asset-g").forEach(g => g.classList.toggle("inspected", g.getAttribute("data-asset") === assetId));
+  $$(".asset").forEach(p => p.classList.toggle("inspected", p.id === "panel-" + assetId));
+}
+
+function closeInspector() {
+  currentInspected = null;
+  currentEWUnit = null;
+  currentSupportUnit = null;
+  const ins = $("#inspector");
+  ins.classList.remove("show","ew-unit","support-asset","active","redeploying","standby");
+  $$(".asset-g.inspected").forEach(g => g.classList.remove("inspected"));
+  $$(".asset.inspected").forEach(p => p.classList.remove("inspected"));
+  $$(".cube-g.inspected").forEach(g => g.classList.remove("inspected"));
+  $$(".support-g.inspected").forEach(g => g.classList.remove("inspected"));
+  $$(".sup-card.inspected").forEach(c => c.classList.remove("inspected"));
+}
+
+function wireAssetClicks() {
+  ASSET_IDS.forEach(id => {
+    const g = $(`#asset-${id}`);
+    if (!g) return;
+    g.style.cursor = "pointer";
+    g.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openInspector(id, { source: "map" });
+    });
+  });
+}
+
+/* ----- EdgeWorks unit inspector ----- */
+let currentEWUnit = null;
+let currentSupportUnit = null;
+
+function renderEWInspector(unitId) {
+  const info = EW_INFO[unitId];
+  const ins   = $("#inspector");
+  const data  = EW_STEP_DATA[unitId] && EW_STEP_DATA[unitId][currentStep];
+  const step  = STEPS[currentStep];
+  const wind  = step.wind && step.wind[unitId];
+
+  ins.classList.add("ew-unit");
+  $("#insName").textContent = info.fullName;
+
+  const windStr = wind != null
+    ? (() => {
+        const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+        const label = dirs[Math.round(wind / 22.5) % 16];
+        return `${wind}° ${label}`;
+      })()
+    : "—";
+
+  const sensorRows = data ? `
+    <tr class="${data.thermal > 200 ? 'alert' : ''}">
+      <td>Thermal cam</td>
+      <td>${data.thermal} °C${data.thermal > 200 ? ' ⚠' : ''}</td>
+    </tr>
+    <tr>
+      <td>Anemometer</td>
+      <td>${windStr} (from)</td>
+    </tr>
+    <tr class="${data.pm25 > 75 ? 'alert' : ''}">
+      <td>PM2.5</td>
+      <td>${data.pm25} µg/m³${data.pm25 > 75 ? ' ⚠' : ''}</td>
+    </tr>
+    <tr>
+      <td>Thermo-hygro</td>
+      <td>${data.temp} °C · RH ${data.rh}%</td>
+    </tr>
+    <tr>
+      <td>Optical cam</td>
+      <td>active</td>
+    </tr>
+  ` : '<tr><td colspan="2" style="color:var(--ink-3)">No readings available</td></tr>';
+
+  const detectBlock = data && data.detections.length ? `
+    <div class="ins-actions">
+      <div class="lbl">Active detections</div>
+      ${data.detections.map(d => `<div class="ew-detection">▸ ${d}</div>`).join("")}
+    </div>
+  ` : '';
+
+  const ifaceBlock = `
+    <div class="ins-actions">
+      <div class="lbl">Interfaces</div>
+      <div style="margin-top:4px">
+        ${info.interfaces.map(i => `<span class="ew-iface">${i}</span>`).join("")}
+      </div>
+    </div>
+  `;
+
+  $("#insBody").innerHTML = `
+    <div class="ins-row"><span class="k">Unit</span><span class="v">${info.fullName}</span></div>
+    <div class="ins-row"><span class="k">Location</span><span class="v">${info.lat.toFixed(3)}, ${info.lng.toFixed(3)} · ${info.elevation}</span></div>
+    <div class="ins-row"><span class="k">Role</span><span class="v">${info.role}</span></div>
+    <div class="ins-actions">
+      <div class="lbl">Sensor readings · ${step.tLabel}</div>
+      <table class="ew-sensor-table">${sensorRows}</table>
+    </div>
+    ${detectBlock}
+    ${ifaceBlock}
+  `;
+}
+
+function positionEWInspector(unitId) {
+  const ins = $("#inspector");
+  const map = $("#mapWrap");
+  const mapRect = map.getBoundingClientRect();
+  const el = $(`#cube-${unitId} .cube-box`) || $(`#cube-${unitId}`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  let x = r.left + r.width / 2 - mapRect.left;
+  let y = r.top - mapRect.top;
+  const pad = 160;
+  x = Math.max(pad, Math.min(mapRect.width - pad, x));
+  const insH = ins.offsetHeight || 320;
+  if (y < insH + 20) {
+    ins.style.transform = "translate(-50%, 24px)";
+    y = r.bottom - mapRect.top;
+  } else {
+    ins.style.transform = "translate(-50%, calc(-100% - 16px))";
+  }
+  ins.style.left = x + "px";
+  ins.style.top  = y + "px";
+}
+
+function openEWInspector(unitId) {
+  // Close any open asset inspector
+  currentInspected = null;
+  $$(".asset-g.inspected").forEach(g => g.classList.remove("inspected"));
+  $$(".asset.inspected").forEach(p => p.classList.remove("inspected"));
+
+  currentEWUnit = unitId;
+  renderEWInspector(unitId);
+  positionEWInspector(unitId);
+  $("#inspector").classList.add("show");
+
+  // Highlight the clicked cube
+  $$(".cube-g").forEach(g => {
+    g.classList.toggle("inspected", g.getAttribute("data-cube") === unitId);
+  });
+}
+
+function closeEWInspector() {
+  currentEWUnit = null;
+  $("#inspector").classList.remove("show");
+  $("#inspector").classList.remove("ew-unit");
+  $$(".cube-g.inspected").forEach(g => g.classList.remove("inspected"));
+}
+
+function wireEWClicks() {
+  $$(".cube-g").forEach(g => {
+    const id = g.getAttribute("data-cube");
+    if (!id) return;
+    g.style.cursor = "pointer";
+    g.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (currentEWUnit === id) { closeEWInspector(); return; }
+      openEWInspector(id);
+    });
+  });
+}
+
+/* ----- Support asset inspector ----- */
+function renderSupportInspector(unitId) {
+  const info = SUPPORT_INFO[unitId];
+  if (!info) return;
+  const ins = $("#inspector");
+  const stepStates = SUPPORT_STEPS[currentStep];
+  const { state, role } = (stepStates && stepStates[unitId]) || { state:"standby", role:"" };
+
+  ins.classList.remove("support-asset","active","redeploying","standby");
+  ins.classList.add("support-asset", state);
+  $("#insName").textContent = unitId;
+
+  const stateLabel = state === "active" ? "ACTIVE" : state === "redeploying" ? "REDEPLOYING" : "STANDBY";
+  const resourceRows = info.resources.map(r =>
+    `<div class="ins-row"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`
+  ).join("");
+
+  $("#insBody").innerHTML = `
+    <span class="sup-badge ${state}">${stateLabel}</span>
+    <div class="ins-row"><span class="k">Name</span><span class="v">${info.fullName}</span></div>
+    <div class="ins-row"><span class="k">Type</span><span class="v">${info.type}</span></div>
+    <div class="ins-row"><span class="k">Status</span><span class="v">${role || "—"}</span></div>
+    <div class="ins-row"><span class="k">Location</span><span class="v">${info.lat.toFixed(3)}, ${info.lng.toFixed(3)}</span></div>
+    <div class="ins-actions">
+      <div class="lbl">Resources</div>
+      ${resourceRows}
+    </div>
+    <div class="ins-actions">
+      <div class="lbl">Notes</div>
+      <div class="item" style="white-space:normal;color:var(--ink-2);line-height:1.5;">${info.notes}</div>
+    </div>
+  `;
+}
+
+function positionSupportInspector(unitId) {
+  const ins = $("#inspector");
+  const map = $("#mapWrap");
+  const mapRect = map.getBoundingClientRect();
+  const el = $(`#sup-${unitId} .s-shape`) || $(`#sup-${unitId}`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  let x = r.left + r.width / 2 - mapRect.left;
+  let y = r.top - mapRect.top;
+  const pad = 160;
+  x = Math.max(pad, Math.min(mapRect.width - pad, x));
+  const insH = ins.offsetHeight || 320;
+  if (y < insH + 20) {
+    ins.style.transform = "translate(-50%, 24px)";
+    y = r.bottom - mapRect.top;
+  } else {
+    ins.style.transform = "translate(-50%, calc(-100% - 16px))";
+  }
+  ins.style.left = x + "px";
+  ins.style.top  = y + "px";
+}
+
+function openSupportInspector(unitId, opts = {}) {
+  // Clear any other open inspector first
+  currentInspected = null;
+  currentEWUnit = null;
+  $$(".asset-g.inspected").forEach(g => g.classList.remove("inspected"));
+  $$(".asset.inspected").forEach(p => p.classList.remove("inspected"));
+  $$(".cube-g.inspected").forEach(g => g.classList.remove("inspected"));
+
+  currentSupportUnit = unitId;
+  renderSupportInspector(unitId);
+
+  // Position from map marker (if clicked from map), else from panel card
+  if (opts.source !== "panel") {
+    positionSupportInspector(unitId);
+  } else {
+    // Anchor to the SVG marker if it exists, else centre of map
+    const el = $(`#sup-${unitId} .s-shape`) || $(`#sup-${unitId}`);
+    if (el) positionSupportInspector(unitId);
+    else {
+      const map = $("#mapWrap"); const mr = map.getBoundingClientRect();
+      $("#inspector").style.left = (mr.width / 2) + "px";
+      $("#inspector").style.top  = (mr.height / 2) + "px";
+      $("#inspector").style.transform = "translate(-50%, -50%)";
+    }
+  }
+
+  $("#inspector").classList.remove("ew-unit","risk");
+  $("#inspector").classList.add("show");
+
+  // Highlight SVG marker + panel card
+  $$(".support-g").forEach(g => g.classList.toggle("inspected", g.getAttribute("data-sup") === unitId));
+  $$(".sup-card").forEach(c => c.classList.toggle("inspected", c.id === "sup-card-" + unitId));
+}
+
+function wireSupportClicks() {
+  $$(".support-g").forEach(g => {
+    const id = g.getAttribute("data-sup");
+    if (!id) return;
+    g.style.cursor = "pointer";
+    g.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (currentSupportUnit === id) { closeInspector(); return; }
+      openSupportInspector(id, { source: "map" });
+    });
+  });
+}
+
+/* ----- Cube highlighting ----- */
+function setFireDetect(cubes) {
+  $$(".cube-g").forEach(g => {
+    const id = g.getAttribute("data-cube");
+    g.classList.toggle("detecting", cubes && cubes.includes(id));
+  });
+}
+
+/* ----- Feed ----- */
+function getEventBadge(step) {
+  const t = step.title.toLowerCase();
+  if (step.isShift)             return ['ev-wind',   'WIND SHIFT'];
+  if (t.includes('ignition'))   return ['ev-fire',   'FIRE'];
+  if (t.includes('smoke'))      return ['ev-smoke',  'SMOKE'];
+  if (t.includes('spread') || t.includes('estimate')) return ['ev-spread','SPREAD'];
+  if (t.includes('approved') || t.includes('supersedes')) return ['ev-rec','RECOM'];
+  if (t.includes('approval') || t.includes('execution')) return ['ev-exec','EXEC'];
+  if (t.includes('stabiliz'))   return ['ev-ok',     'STABLE'];
+  if (t.includes('audit'))      return ['ev-audit',  'AUDIT'];
+  return ['ev-info', 'INFO'];
+}
+
+function pushFeed(step) {
+  const feed = $("#feed");
+  const card = document.createElement("div");
+  const [cls, label] = getEventBadge(step);
+  card.className = "event-card" + (step.isShift ? " high" : "");
+  card.innerHTML = `
+    <div class="when">${step.tLabel}</div>
+    <span class="ev-badge ${cls}">${label}</span>
+    <div class="what">${step.title}</div>
+    <div class="why">${step.detail}</div>
+  `;
+  feed.prepend(card);
+}
+
+function clearFeed() { $("#feed").innerHTML = ""; }
+
+/* ----- Pop card ----- */
+function popOn(step) {
+  if (!step.pop) return;
+  const pc = $("#popCard");
+  $("#popTitle").textContent = step.pop.title;
+  $("#popBody").textContent = step.pop.body;
+  // Position near fire by default
+  const wrap = $("#mapWrap");
+  const rect = wrap.getBoundingClientRect();
+  pc.style.left = (rect.width * 0.45) + "px";
+  pc.style.top  = (rect.height * 0.30) + "px";
+  pc.classList.add("show");
+  clearTimeout(window._popT);
+  window._popT = setTimeout(() => pc.classList.remove("show"), 3000);
+}
+
+/* ----- Step application ----- */
+function applyStep(i) {
+  const step = STEPS[i];
+
+  // Update footer event banner
+  const [bCls, bLabel] = getEventBadge(step);
+  const fbTime  = $("#fbTime");
+  const fbBadge = $("#fbBadge");
+  const fbTitle = $("#fbTitle");
+  if (fbTime)  fbTime.textContent = step.tLabel;
+  if (fbBadge) { fbBadge.className = "ev-badge " + bCls; fbBadge.textContent = bLabel; }
+  if (fbTitle) fbTitle.textContent = step.title;
+  const fbDetail = $("#fbDetail");
+  if (fbDetail) fbDetail.textContent = step.detail || '';
+  // Keep reopen pill in sync
+  const rb = $("#bannerReopenBadge"); const rt = $("#bannerReopenTitle");
+  if (rb) { rb.className = "ev-badge " + bCls; rb.textContent = bLabel; }
+  if (rt) rt.textContent = step.title;
+
+  $("#clock").textContent = step.tLabel;
+  setWind(step.wind);
+  setCone(step.cone);
+  setRisk(step.risk);
+  setFireDetect(step.fireDetect);
+  popOn(step);
+  setProgress();
+  setSupport(currentStep);
+  // Re-render the inspector with the new step's risk context, if open
+  if (currentInspected) {
+    renderInspector(currentInspected);
+    positionInspector(currentInspected);
+  }
+  if (currentEWUnit) {
+    renderEWInspector(currentEWUnit);
+    positionEWInspector(currentEWUnit);
+  }
+  if (currentSupportUnit) {
+    renderSupportInspector(currentSupportUnit);
+  }
+}
+
+function gotoStep(i) {
+  if (i < 0 || i >= STEPS.length) return;
+  // Rebuild feed up to step i for clean state when jumping
+  clearFeed();
+  for (let j = 0; j <= i; j++) pushFeed(STEPS[j]);
+  currentStep = i;
+  applyStep(i);
+}
+
+function nextStep() {
+  if (currentStep < STEPS.length - 1) {
+    currentStep++;
+    pushFeed(STEPS[currentStep]);
+    applyStep(currentStep);
+  } else {
+    pause();
+  }
+}
+
+function prevStep() {
+  if (currentStep > 0) gotoStep(currentStep - 1);
+}
+
+function play() {
+  playing = true;
+  $("#playPause").textContent = "❚❚";
+  scheduleNext();
+}
+function pause() {
+  playing = false;
+  $("#playPause").textContent = "▶";
+  clearTimeout(playTimer);
+}
+function scheduleNext() {
+  clearTimeout(playTimer);
+  if (!playing) return;
+  // Time between steps proportional to scenario gap, capped/floored.
+  const cur = STEPS[currentStep].tMin;
+  const nxt = (currentStep < STEPS.length - 1) ? STEPS[currentStep+1].tMin : cur;
+  const gap = Math.max(2, nxt - cur);   // minutes
+  const baseMs = 1400 + Math.min(2200, gap * 90);
+  const ms = baseMs / speed;
+  playTimer = setTimeout(() => {
+    nextStep();
+    if (playing && currentStep < STEPS.length - 1) scheduleNext();
+    else pause();
+  }, ms);
+}
+
+/* ----- Speed toggle ----- */
+function cycleSpeed() {
+  const idx = SPEEDS.indexOf(speed);
+  speed = SPEEDS[(idx + 1) % SPEEDS.length];
+  $("#speedLabel").textContent = speed + "×";
+  if (playing) scheduleNext();
+}
+
+/* ----- Wiring ----- */
+$("#playPause").addEventListener("click", () => playing ? pause() : play());
+$("#nextStep").addEventListener("click", () => { pause(); nextStep(); });
+$("#prevStep").addEventListener("click", () => { pause(); prevStep(); });
+$("#speedToggle").addEventListener("click", cycleSpeed);
+$("#restart").addEventListener("click", () => { pause(); gotoStep(0); });
+$("#jumpBefore").addEventListener("click", () => { pause(); gotoStep(3); });   // T+12: REC-001 approved (pre-shift)
+$("#jumpAfter").addEventListener("click",  () => { pause(); gotoStep(7); });   // T+35: post-shift executions
+
+/* ----- Banner close / reopen ----- */
+$("#bannerClose").addEventListener("click", () => {
+  $("#mapBanner").style.display = "none";
+  const reopen = $("#bannerReopen");
+  reopen.style.display = "flex";
+});
+$("#bannerReopen").addEventListener("click", () => {
+  $("#mapBanner").style.display = "flex";
+  $("#bannerReopen").style.display = "none";
+});
+
+/* ----- Background toggle ----- */
+$("#bgToggle").addEventListener("change", (e) => {
+  $("#mapWrap").classList.toggle("no-bg", !e.target.checked);
+});
+
+/* ----- Inspector wiring ----- */
+$("#insClose").addEventListener("click", closeInspector);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeInspector(); });
+$("#mapWrap").addEventListener("click", (e) => {
+  // Click on empty map area closes the inspector
+  if (e.target.closest("#inspector")) return;
+  if (e.target.closest(".asset-g")) return;
+  if (e.target.closest(".cube-g")) return;
+  if (e.target.closest(".support-g")) return;
+  closeInspector();
+});
+
+/* ----- Init ----- */
+buildTimeline();
+buildSupport();
+buildAssets();
+wireAssetClicks();
+wireEWClicks();
+wireSupportClicks();
+gotoStep(0);
+
+</script>
+</body>
+</html>
