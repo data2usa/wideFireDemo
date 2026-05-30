@@ -1,5 +1,7 @@
 # Wildfire Scenario — reView ingestible dataset
 
+**[▶ Run demo (dark)](https://data2usa.github.io/wideFireDemo/demo.html?mode=dark) · [Run demo (light)](https://data2usa.github.io/wideFireDemo/demo.html?mode=light)**
+
 Synthetic data set for the **Bear Creek Fire** demo. Story is in [wildfireStory.md](wildfireStory.md).
 
 ## Files
